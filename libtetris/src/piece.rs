@@ -91,9 +91,11 @@ impl FallingPiece {
             self.y = initial.y + dy;
             if !board.obstructed(self) {
                 let mut piece = *self;
-                if !piece.shift(board, -1, 0) && !piece.shift(board, 1, 0) && !piece.shift(board, 0, 1) {
-                    self.tspin = TspinStatus::Full;
-                }
+                self.tspin = if !piece.shift(board, -1, 0) && !piece.shift(board, 1, 0) && !piece.shift(board, 0, 1) {
+                    TspinStatus::Full
+                } else {
+                    TspinStatus::None
+                };
                 return true
             }
         }

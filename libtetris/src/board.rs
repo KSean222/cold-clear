@@ -177,7 +177,7 @@ impl<R: Row> Board<R> {
 
         let perfect_clear = self.column_heights == [0; 10];
         if perfect_clear {
-            garbage_sent = 10;
+            garbage_sent = 6;
         }
 
         let l = LockResult {

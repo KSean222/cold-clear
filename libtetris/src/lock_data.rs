@@ -38,7 +38,8 @@ impl PlacementKind {
             None | MiniTspin | Tspin | Clear1 | MiniTspin1 => 0,
             Clear2 | MiniTspin2 => 1,
             Clear3 | Tspin1 => 2,
-            Clear4 | Tspin2 => 4,
+            Clear4 => 3,
+            Tspin2 => 4,
             Tspin3 => 6
         }
     }
@@ -104,14 +105,14 @@ impl PlacementKind {
             PlacementKind::Clear1     => "S",
             PlacementKind::Clear2     => "D",
             PlacementKind::Clear3     => "T",
-            PlacementKind::Clear4     => "Tet",
+            PlacementKind::Clear4     => "Q",
             PlacementKind::MiniTspin  => "ts",
-            PlacementKind::MiniTspin1 => "tss",
-            PlacementKind::MiniTspin2 => "tsd",
-            PlacementKind::Tspin      => "TS",
-            PlacementKind::Tspin1     => "TSS",
-            PlacementKind::Tspin2     => "TSD",
-            PlacementKind::Tspin3     => "TST",
+            PlacementKind::MiniTspin1 => "ss",
+            PlacementKind::MiniTspin2 => "sd",
+            PlacementKind::Tspin      => "S",
+            PlacementKind::Tspin1     => "SS",
+            PlacementKind::Tspin2     => "SD",
+            PlacementKind::Tspin3     => "ST",
         }
     }
 }
@@ -122,14 +123,7 @@ impl Default for PlacementKind {
     }
 }
 
-pub const COMBO_GARBAGE: [u32; 12] = [
-    0, 0,       // 0, 1 combo
-    1, 1,       // 2, 3 combo
-    2, 2,       // 4, 5 combo
-    3, 3,       // 6, 7 combo
-    4, 4, 4,    // 8, 9, 10 combo
-    5           // 11+ combo
-];
+pub const COMBO_GARBAGE: [u32; 12] = [0; 12];
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Default, Hash, Serialize, Deserialize)]
 pub struct Statistics {
