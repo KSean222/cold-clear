@@ -87,14 +87,14 @@ impl PlacementKind {
             PlacementKind::Clear1     => "Single",
             PlacementKind::Clear2     => "Double",
             PlacementKind::Clear3     => "Triple",
-            PlacementKind::Clear4     => "Tetris",
-            PlacementKind::MiniTspin  => "Mini T-Spin",
-            PlacementKind::MiniTspin1 => "Mini T-Spin Single",
-            PlacementKind::MiniTspin2 => "Mini T-Spin Double",
-            PlacementKind::Tspin      => "T-Spin",
-            PlacementKind::Tspin1     => "T-Spin Single",
-            PlacementKind::Tspin2     => "T-Spin Double",
-            PlacementKind::Tspin3     => "T-Spin Triple",
+            PlacementKind::Clear4     => "Quadruple",
+            PlacementKind::MiniTspin  => "Mini Spin",
+            PlacementKind::MiniTspin1 => "Mini Spin Single",
+            PlacementKind::MiniTspin2 => "Mini Spin Double",
+            PlacementKind::Tspin      => "Spin",
+            PlacementKind::Tspin1     => "Spin Single",
+            PlacementKind::Tspin2     => "Spin Double",
+            PlacementKind::Tspin3     => "Spin Triple",
         }
     }
 

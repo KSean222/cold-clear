@@ -40,7 +40,7 @@ pub fn find_moves(
     let mut check_queue = vec![];
     let fast_mode;
 
-    if board.column_heights().iter().all(|&v| v < 16) {
+    if false {
         // We know that we can reach any column and rotation state without bumping into the terrain
         // at 0G here, so we can just grab those starting positions.
         let starts = match mode {
