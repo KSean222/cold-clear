@@ -1,0 +1,16 @@
+[package]
+name = "misamino-dll"
+version = "0.1.0"
+authors = ["KSean222 <44050761+KSean222@users.noreply.github.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "misamino_cc_ai"
+crate-type = ["cdylib"]
+
+[dependencies]
+cold-clear = { path = "../bot" }
+libtetris = { path = "../libtetris" }
+lazy_static = "1.4.0"
