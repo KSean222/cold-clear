@@ -7,5 +7,6 @@ members = [
     "gui",
     "c-api",
     "compare",
-    "optimizer"
+    "optimizer",
+    "misamino-dll"
 ]
