@@ -361,6 +361,19 @@ impl Piece {
         }
     }
 
+    pub fn from_char(c: char) -> Piece {
+        match c {
+            'I' => Piece::I,
+            'T' => Piece::T,
+            'O' => Piece::O,
+            'L' => Piece::L,
+            'J' => Piece::J,
+            'S' => Piece::S,
+            'Z' => Piece::Z,
+            _ => unreachable!("Invalid piece: {}", c)
+        }
+    }
+
     pub fn color(self) -> CellColor {
         match self {
             Piece::I => CellColor::I,
