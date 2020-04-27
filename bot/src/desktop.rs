@@ -1,13 +1,15 @@
 use std::sync::mpsc::{ Sender, Receiver, TryRecvError, channel };
 use std::sync::Arc;
+use std::thread::JoinHandle;
 use libtetris::*;
 use crate::evaluation::Evaluator;
 use crate::moves::Move;
 use crate::{ Options, Info, AsyncBotState, BotMsg, BotPollState };
 
 pub struct Interface {
-    send: Sender<BotMsg>,
+    send: Option<Sender<BotMsg>>,
     recv: Receiver<(Move, Info)>,
+    thread: Option<JoinHandle<()>>
 }
 
 impl Interface {
@@ -17,10 +19,12 @@ impl Interface {
     ) -> Self {
         let (bot_send, recv) = channel();
         let (send, bot_recv) = channel();
-        std::thread::spawn(move || run(bot_recv, bot_send, board, evaluator, options));
+        let thread = std::thread::spawn(move || run(bot_recv, bot_send, board, evaluator, options));
 
         Interface {
-            send, recv
+            send: Some(send),
+            recv,
+            thread: Some(thread)
         }
     }
 
@@ -42,7 +46,7 @@ impl Interface {
     /// Once a move is chosen, the bot will update its internal state to the result of the piece
     /// being placed correctly and the move will become available by calling `poll_next_move`.
     pub fn request_next_move(&self, incoming: u32) {
-        self.send.send(BotMsg::NextMove(incoming)).ok();
+        self.send.as_ref().unwrap().send(BotMsg::NextMove(incoming)).ok();
     }
 
     /// Checks to see if the bot has provided the previously requested move yet.
@@ -73,7 +77,7 @@ impl Interface {
     /// bag you've provided the sequence IJOZT, then the next time you call this function you can
     /// only provide either an L or an S piece.
     pub fn add_next_piece(&self, piece: Piece) {
-        self.send.send(BotMsg::NewPiece(piece)).ok();
+        self.send.as_ref().unwrap().send(BotMsg::NewPiece(piece)).ok();
     }
 
     /// Resets the playfield, back-to-back status, and combo count.
@@ -86,14 +90,21 @@ impl Interface {
     /// number of consecutive line clears achieved. So, generally speaking, if "x Combo" appears
     /// on the screen, you need to use x+1 here.
     pub fn reset(&self, field: [[bool; 10]; 40], b2b_active: bool, combo: u32) {
-        self.send.send(BotMsg::Reset {
+        self.send.as_ref().unwrap().send(BotMsg::Reset {
             field, b2b: b2b_active, combo
         }).ok();
     }
 
     /// Specifies a line that Cold Clear should analyze before making any moves.
     pub fn force_analysis_line(&self, path: Vec<FallingPiece>) {
-        self.send.send(BotMsg::ForceAnalysisLine(path)).ok();
+        self.send.as_ref().unwrap().send(BotMsg::ForceAnalysisLine(path)).ok();
+    }
+}
+
+impl Drop for Interface {
+    fn drop(&mut self) {
+        let _ = self.send.take();
+        self.thread.take().unwrap().join().unwrap();
     }
 }
 
