@@ -15,25 +15,30 @@ pub extern "C" fn AIName(level: c_int) -> *mut c_char {
     CString::new(format!("Cold Clear LVL {}", level)).unwrap().into_raw()
 }
 
-
 struct GlobalState {
     bot: Option<cold_clear::Interface>,
-    move_ptrs: [Option<usize>; 2],
+    move_ptr: Option<usize>,
     expected_field: [[bool; 10]; 40],
     expected_queue: Vec<Piece>,
     prev_field: [[bool; 10]; 40],
     prev_hold: Option<Piece>
 }
 
+impl GlobalState {
+    fn new() -> GlobalState {
+        GlobalState {
+            bot: None,
+            move_ptr: None,
+            expected_field: [[false; 10]; 40],
+            expected_queue: Vec::new(),
+            prev_field: [[true; 10]; 40],
+            prev_hold: None
+        }
+    }
+}
+
 lazy_static! {
-    static ref STATE: Mutex<GlobalState> = Mutex::new(GlobalState {
-        bot: None,
-        move_ptrs: [None; 2],
-        expected_field: [[false; 10]; 40],
-        expected_queue: Vec::new(),
-        prev_field: [[true; 10]; 40],
-        prev_hold: None
-    });
+    static ref STATE: Mutex<[GlobalState; 2]> = Mutex::new([GlobalState::new(), GlobalState::new()]);
 }
 
 fn create_interface(board: &Board) -> cold_clear::Interface {
@@ -69,7 +74,7 @@ pub extern "C" fn TetrisAI(
     } else {
         Some(Piece::from_char(hold))
     };
-    let mut state = STATE.lock().unwrap();
+    let mut state = &mut STATE.lock().unwrap()[player as usize];
     let mut board = Board::<u16>::new();
     board.add_next_piece(Piece::from_char((active as u8) as char));
     board.set_field(field);
@@ -105,16 +110,16 @@ pub extern "C" fn TetrisAI(
             state.bot.as_mut().unwrap().reset(field, b2b != 0, combo as u32);
         } else {
             println!("Returned old calculation for board");
-            return state.move_ptrs[player as usize].unwrap() as *mut c_char;
+            return state.move_ptr.unwrap() as *mut c_char;
         }
         if state.expected_queue.iter().zip(next.iter()).any(|p| *p.0 != *p.1) {
             println!("Detected new game. Reset bot.");
             state.bot = None;
             state.bot = Some(create_interface(&board));
-            if let Some(ptr) = state.move_ptrs[player as usize] {
+            if let Some(ptr) = state.move_ptr {
                 let _ = unsafe { CString::from_raw(ptr as *mut c_char) };
             }
-            state.move_ptrs[player as usize] = None;
+            state.move_ptr = None;
             update_queue = false;
         }
     }
@@ -151,9 +156,9 @@ pub extern "C" fn TetrisAI(
     } else {
         CString::new("V").unwrap()
     }.into_raw();
-    if let Some(ptr) = state.move_ptrs[player as usize] {
+    if let Some(ptr) = state.move_ptr {
         let _ = unsafe { CString::from_raw(ptr as *mut c_char) };
     }
-    state.move_ptrs[player as usize] = Some(ptr as usize);
+    state.move_ptr = Some(ptr as usize);
     ptr
 }
