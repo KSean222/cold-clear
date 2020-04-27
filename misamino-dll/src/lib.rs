@@ -166,6 +166,14 @@ fn create_interface(board: &Board, player: i32) -> cold_clear::Interface {
     )
 }
 
+fn create_interface(board: &Board) -> cold_clear::Interface {
+    cold_clear::Interface::launch(
+        board.clone(),
+        cold_clear::Options::default(),
+        cold_clear::evaluation::Standard::fast_config()
+    )
+}
+
 #[no_mangle]
 pub extern "C" fn TetrisAI(
     overfield: *const c_int, field_ptr: *const c_int, field_w: c_int, field_h: c_int, b2b: c_int,
@@ -233,6 +241,16 @@ pub extern "C" fn TetrisAI(
             println!("Detected new game. Reset bot.");
             state.bot = None;
             state.bot = Some(create_interface(&board, player));
+            update_queue = false;
+        }
+        if state.expected_queue.iter().zip(next.iter()).any(|p| *p.0 != *p.1) {
+            println!("Detected new game. Reset bot.");
+            state.bot = None;
+            state.bot = Some(create_interface(&board));
+            if let Some(ptr) = state.move_ptrs[player as usize] {
+                let _ = unsafe { CString::from_raw(ptr as *mut c_char) };
+            }
+            state.move_ptrs[player as usize] = None;
             update_queue = false;
         }
     }
