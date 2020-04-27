@@ -15,7 +15,7 @@ pub extern "C" fn AIName(level: c_int) -> *mut c_char {
     CString::new(format!("Cold Clear LVL {}", level)).unwrap().into_raw()
 }
 
-struct GlobalState {
+struct MisaInterface {
     bot: Option<cold_clear::Interface>,
     move_ptr: Option<usize>,
     expected_field: [[bool; 10]; 40],
@@ -24,9 +24,9 @@ struct GlobalState {
     prev_hold: Option<Piece>
 }
 
-impl GlobalState {
-    fn new() -> GlobalState {
-        GlobalState {
+impl MisaInterface {
+    fn new() -> MisaInterface {
+        MisaInterface {
             bot: None,
             move_ptr: None,
             expected_field: [[false; 10]; 40],
@@ -38,7 +38,7 @@ impl GlobalState {
 }
 
 lazy_static! {
-    static ref STATE: Mutex<[GlobalState; 2]> = Mutex::new([GlobalState::new(), GlobalState::new()]);
+    static ref STATE: Mutex<[MisaInterface; 2]> = Mutex::new([MisaInterface::new(), MisaInterface::new()]);
 }
 
 fn create_interface(board: &Board) -> cold_clear::Interface {
