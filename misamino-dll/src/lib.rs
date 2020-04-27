@@ -247,10 +247,10 @@ pub extern "C" fn TetrisAI(
             println!("Detected new game. Reset bot.");
             state.bot = None;
             state.bot = Some(create_interface(&board));
-            if let Some(ptr) = state.move_ptrs[player as usize] {
+            if let Some(ptr) = state.move_ptr {
                 let _ = unsafe { CString::from_raw(ptr as *mut c_char) };
             }
-            state.move_ptrs[player as usize] = None;
+            state.move_ptr = None;
             update_queue = false;
         }
     }
