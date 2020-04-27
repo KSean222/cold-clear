@@ -24,21 +24,22 @@ struct MisaInterface {
     prev_hold: Option<Piece>
 }
 
-impl MisaInterface {
-    fn new() -> MisaInterface {
-        MisaInterface {
-            bot: None,
-            move_ptr: None,
-            expected_field: [[false; 10]; 40],
-            expected_queue: Vec::new(),
-            prev_field: [[true; 10]; 40],
-            prev_hold: None
-        }
-    }
+fn create_misa_interface() -> Mutex<MisaInterface> {
+    Mutex::new(MisaInterface {
+        bot: None,
+        move_ptr: None,
+        expected_field: [[false; 10]; 40],
+        expected_queue: Vec::new(),
+        prev_field: [[true; 10]; 40],
+        prev_hold: None
+    })
 }
 
 lazy_static! {
-    static ref STATE: Mutex<[MisaInterface; 2]> = Mutex::new([MisaInterface::new(), MisaInterface::new()]);
+    static ref STATE: [Mutex<MisaInterface>; 2] = [
+        create_misa_interface(),
+        create_misa_interface()
+    ];
 }
 
 fn create_interface(board: &Board) -> cold_clear::Interface {
@@ -74,7 +75,7 @@ pub extern "C" fn TetrisAI(
     } else {
         Some(Piece::from_char(hold))
     };
-    let mut state = &mut STATE.lock().unwrap()[player as usize];
+    let mut state = STATE[player as usize].lock().unwrap();
     let mut board = Board::<u16>::new();
     board.add_next_piece(Piece::from_char((active as u8) as char));
     board.set_field(field);
