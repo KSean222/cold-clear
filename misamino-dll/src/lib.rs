@@ -55,7 +55,8 @@ pub extern "C" fn TetrisAI(
     let next: Vec<Piece> = next.into_iter().map(|&p| Piece::from_char((p as u8) as char)).collect();
     let hold = (hold as u8) as char;
     let mut state = STATE.lock().unwrap();
-    if state.bot.is_none() {
+    let init = state.bot.is_none();
+    if init {
         let mut board = Board::<u16>::new();
         board.add_next_piece(Piece::from_char((active as u8) as char));
         board.set_field(field);
@@ -71,24 +72,13 @@ pub extern "C" fn TetrisAI(
         board.combo = combo as u32;
         state.bot = Some(cold_clear::Interface::launch(
             board,
-            cold_clear::Options {
-                speculate: true,
-                ..Default::default()
-            },
-            cold_clear::evaluation::Standard::fast_config()
+            cold_clear::Options::default(),
+            cold_clear::evaluation::Standard::default()
         ));
     } else if state.reset {
         state.bot.as_mut().unwrap().reset(field, b2b != 0, combo as u32);
         state.reset = false;
-    } else {
-        if state.prev_hold == ' ' && hold != ' ' {
-            println!("Added new piece {}", next[next.len() - 2].to_char());
-            state.bot.as_mut().unwrap().add_next_piece(next[next.len() - 2]);
-        }
-        println!("Added new piece {}", next[next.len() - 1].to_char());
-        state.bot.as_mut().unwrap().add_next_piece(next[next.len() - 1]);
     }
-    state.prev_hold = hold;
     state.reset = true;
     for (i, &row) in field.iter().enumerate() {
         if state.last_seen_field[i] != row {
@@ -98,10 +88,19 @@ pub extern "C" fn TetrisAI(
     if state.reset {
         println!("Returned old calculation for board");
         return state.move_ptrs[player as usize].unwrap() as *mut c_char;
+    } else if !init {
+        if state.prev_hold == ' ' && hold != ' ' {
+            println!("Added new piece {}", next[next.len() - 2].to_char());
+            state.bot.as_mut().unwrap().add_next_piece(next[next.len() - 2]);
+        }
+        println!("Added new piece {}", next[next.len() - 1].to_char());
+        state.bot.as_mut().unwrap().add_next_piece(next[next.len() - 1]);
     }
+    state.prev_hold = hold;
     state.last_seen_field = field;
     let bot = state.bot.as_mut().unwrap();
     bot.request_next_move(incoming_att as u32);
+    std::thread::sleep(std::time::Duration::from_millis(500));
     //TODO check if it doesn't leak memory
     //It desyncs because MisaMino calls the bot *again* if there's new information. That's what we want, but we need to detect these and apply the reset function
     let ptr = if let Some((mv, _)) = bot.block_next_move() {
