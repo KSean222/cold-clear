@@ -19,18 +19,18 @@ pub extern "C" fn AIName(level: c_int) -> *mut c_char {
 struct GlobalState {
     bot: Option<cold_clear::Interface>,
     move_ptrs: [Option<usize>; 2],
-    last_seen_field: [[bool; 10]; 40],
-    reset: bool,
-    prev_hold: char
+    expected_field: [[bool; 10]; 40],
+    prev_field: [[bool; 10]; 40],
+    prev_hold: Option<Piece>
 }
 
 lazy_static! {
     static ref STATE: Mutex<GlobalState> = Mutex::new(GlobalState {
         bot: None,
         move_ptrs: [None; 2],
-        last_seen_field: [[true; 10]; 40],
-        reset: false,
-        prev_hold: ' '
+        expected_field: [[false; 10]; 40],
+        prev_field: [[true; 10]; 40],
+        prev_hold: None
     });
 }
 
@@ -54,57 +54,68 @@ pub extern "C" fn TetrisAI(
     let next: &[c_char] = unsafe { std::slice::from_raw_parts(next, max_depth as usize) };
     let next: Vec<Piece> = next.into_iter().map(|&p| Piece::from_char((p as u8) as char)).collect();
     let hold = (hold as u8) as char;
+    let hold = if hold == ' ' {
+        None
+    } else {
+        Some(Piece::from_char(hold))
+    };
     let mut state = STATE.lock().unwrap();
+    let mut board = Board::<u16>::new();
+    board.add_next_piece(Piece::from_char((active as u8) as char));
+    board.set_field(field);
+    for &piece in &next {
+        board.add_next_piece(piece);
+    }
+    board.hold_piece = hold;
+    board.b2b_bonus = b2b != 0;
+    board.combo = combo as u32;
     let init = state.bot.is_none();
+    let mut update_queue = true;
     if init {
-        let mut board = Board::<u16>::new();
-        board.add_next_piece(Piece::from_char((active as u8) as char));
-        board.set_field(field);
-        for &piece in &next {
-            board.add_next_piece(piece);
-        }
-        board.hold_piece = if hold == ' ' {
-            None
-        } else {
-            Some(Piece::from_char(hold))
-        };
-        board.b2b_bonus = b2b != 0;
-        board.combo = combo as u32;
         state.bot = Some(cold_clear::Interface::launch(
-            board,
+            board.clone(),
             cold_clear::Options::default(),
-            cold_clear::evaluation::Standard::default()
+            cold_clear::evaluation::Standard::fast_config()
         ));
-    } else if state.reset {
-        state.bot.as_mut().unwrap().reset(field, b2b != 0, combo as u32);
-        state.reset = false;
+        update_queue = false;
     }
-    state.reset = true;
+    let mut unexpected = false;
     for (i, &row) in field.iter().enumerate() {
-        if state.last_seen_field[i] != row {
-            state.reset = false;
+        if state.expected_field[i] != row {
+            unexpected = true;
+            break;
         }
     }
-    if state.reset {
-        println!("Returned old calculation for board");
-        return state.move_ptrs[player as usize].unwrap() as *mut c_char;
-    } else if !init {
-        if state.prev_hold == ' ' && hold != ' ' {
-            println!("Added new piece {}", next[next.len() - 2].to_char());
+    if unexpected {
+        let mut piece_dropped = false;
+        for (i, &row) in field.iter().enumerate() {
+            if state.prev_field[i] != row {
+                piece_dropped = true;
+                break;
+            }
+        }
+        if piece_dropped {
+            println!("Misdrop or garbage!");
+            state.bot.as_mut().unwrap().reset(field, b2b != 0, combo as u32);
+        } else {
+            println!("Returned old calculation for board");
+            return state.move_ptrs[player as usize].unwrap() as *mut c_char;
+        }
+    }
+    if update_queue {
+        if state.prev_hold.is_none() && hold.is_some() {
             state.bot.as_mut().unwrap().add_next_piece(next[next.len() - 2]);
         }
-        println!("Added new piece {}", next[next.len() - 1].to_char());
         state.bot.as_mut().unwrap().add_next_piece(next[next.len() - 1]);
     }
     state.prev_hold = hold;
-    state.last_seen_field = field;
+    state.prev_field = field;
     let bot = state.bot.as_mut().unwrap();
     bot.request_next_move(incoming_att as u32);
-    std::thread::sleep(std::time::Duration::from_millis(500));
-    //TODO check if it doesn't leak memory
-    //It desyncs because MisaMino calls the bot *again* if there's new information. That's what we want, but we need to detect these and apply the reset function
     let ptr = if let Some((mv, _)) = bot.block_next_move() {
         let mut moves = String::with_capacity(mv.inputs.len() + 2);
+        board.lock_piece(mv.expected_location);
+        state.expected_field = board.get_field();
         if mv.hold {
             moves.push('v');
         }
