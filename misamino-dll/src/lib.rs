@@ -23,7 +23,7 @@ pub extern "C" fn AIName(level: c_int) -> *mut c_char {
 
 struct MisaInterface {
     bot: Option<cold_clear::Interface>,
-    move_ptr: Option<usize>,
+    last_move: CString,
     expected_field: [[bool; 10]; 40],
     expected_queue: Vec<Piece>,
     prev_field: [[bool; 10]; 40],
@@ -33,7 +33,7 @@ struct MisaInterface {
 fn create_misa_interface() -> Mutex<MisaInterface> {
     Mutex::new(MisaInterface {
         bot: None,
-        move_ptr: None,
+        last_move: CString::default(),
         expected_field: [[false; 10]; 40],
         expected_queue: Vec::new(),
         prev_field: [[true; 10]; 40],
@@ -157,7 +157,7 @@ pub extern "C" fn TetrisAI(
     combo: c_int, next: *const c_char, hold: c_char, cur_can_hold: bool, active: c_char,
     x: i32, y: i32, spin: i32, canhold: bool, can180spin: bool, incoming_att: c_int,
     combo_table: *const c_int, max_depth: c_int, level: c_int, player: c_int)
-    -> *mut c_char {
+    -> *const c_char {
     assert!(!field.is_null(), "`field` was null");
     assert!(field_w == 10, "`field_w` was not 10");
     assert!(field_h == 22, "`field_h` was not 22");
@@ -212,16 +212,12 @@ pub extern "C" fn TetrisAI(
             state.bot.as_mut().unwrap().reset(field, b2b != 0, combo as u32);
         } else {
             println!("Returned old calculation for board");
-            return state.move_ptr.unwrap() as *mut c_char;
+            return state.last_move.as_ptr();
         }
         if state.expected_queue.iter().zip(next.iter()).any(|p| *p.0 != *p.1) {
             println!("Detected new game. Reset bot.");
             state.bot = None;
             state.bot = Some(create_interface(&board, player));
-            if let Some(ptr) = state.move_ptr {
-                let _ = unsafe { CString::from_raw(ptr as *mut c_char) };
-            }
-            state.move_ptr = None;
             update_queue = false;
         }
     }
@@ -235,7 +231,7 @@ pub extern "C" fn TetrisAI(
     state.prev_field = field;
     let bot = state.bot.as_mut().unwrap();
     bot.request_next_move(incoming_att as u32);
-    let ptr = if let Some((mv, _)) = bot.block_next_move() {
+    state.last_move = if let Some((mv, _)) = bot.block_next_move() {
         let mut moves = String::with_capacity(mv.inputs.len() + 2);
         board.lock_piece(mv.expected_location);
         state.expected_field = board.get_field();
@@ -257,10 +253,6 @@ pub extern "C" fn TetrisAI(
         CString::new(moves).unwrap()
     } else {
         CString::new("V").unwrap()
-    }.into_raw();
-    if let Some(ptr) = state.move_ptr {
-        let _ = unsafe { CString::from_raw(ptr as *mut c_char) };
-    }
-    state.move_ptr = Some(ptr as usize);
-    ptr
+    };
+    state.last_move.as_ptr()
 }
