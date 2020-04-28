@@ -5,7 +5,6 @@ use std::sync::Mutex;
 use libtetris::{ Board, Piece, PieceMovement };
 use serde::{ Serialize, Deserialize };
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::io::{ BufReader, BufWriter };
 use std::fs::File;
 
@@ -80,14 +79,13 @@ fn dll_path() -> Result<PathBuf, (&'static str, u32)> {
         &mut hm) } == 0 {
         return Err(("GetModuleHandleExA", unsafe { GetLastError() }));
     }
-    let filename_ptr = CString::new([' '; 255].iter().collect::<String>()).unwrap().into_raw();
-    let result = unsafe { GetModuleFileNameA(hm, filename_ptr, 255) };
-    let filename = unsafe { CString::from_raw(filename_ptr) };
-    if result == 0 {
+    let path_ptr = CString::new(" ".repeat(255)).unwrap().into_raw();
+    let path_size = unsafe { GetModuleFileNameA(hm, path_ptr, 255) };
+    let path = unsafe { CString::from_raw(path_ptr) };
+    if path_size == 0 {
         return Err(("GetModuleFileNameA", unsafe { GetLastError() }));
     }
-    let filename = filename.into_string().unwrap();
-    Ok(PathBuf::from_str(&filename[0..(result as usize)]).unwrap())
+    Ok(PathBuf::from(path.into_string().unwrap()))
 }
 
 #[derive(Debug)]
