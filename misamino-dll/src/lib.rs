@@ -2,11 +2,16 @@ use std::ffi::CString;
 use std::os::raw::*;
 use lazy_static::lazy_static;
 use std::sync::Mutex;
-use libtetris::{ Board, Piece, PieceMovement };
+use libtetris::{ Board, Piece, PieceMovement, RotationState, TspinStatus };
 use serde::{ Serialize, Deserialize };
 use std::path::PathBuf;
 use std::io::{ BufReader, BufWriter };
 use std::fs::File;
+use std::collections::HashMap;
+
+lazy_static! {
+    static ref DLL_DIR: PathBuf = dll_path().unwrap().parent().unwrap().to_path_buf();
+}
 
 #[no_mangle]
 pub extern "C" fn AIDllVersion() -> c_int {
@@ -15,8 +20,7 @@ pub extern "C" fn AIDllVersion() -> c_int {
 
 #[no_mangle]
 pub extern "C" fn AIName(level: c_int) -> *mut c_char {
-    //Ensure that the options are loaded by now
-    let _options = &OPTIONS.ai_p1;
+    let options = &OPTIONS.ai_p1;
     //Pretty sure this leaks memory but hopefully MisaMino Client just calls it once
     CString::new(format!("Cold Clear LVL {}", level)).unwrap().into_raw()
 }
@@ -90,15 +94,8 @@ fn dll_path() -> Result<PathBuf, (&'static str, u32)> {
 
 #[derive(Debug)]
 enum MisaCCOptionError {
-    WinDllPathError((&'static str, u32)),
     FileError(std::io::Error),
     YamlParsingError(serde_yaml::Error)
-}
-
-impl From<(&'static str, u32)> for MisaCCOptionError {
-    fn from(err: (&'static str, u32)) -> MisaCCOptionError {
-        MisaCCOptionError::WinDllPathError(err)
-    }
 }
 
 impl From<std::io::Error> for MisaCCOptionError {
@@ -115,17 +112,31 @@ impl From<serde_yaml::Error> for MisaCCOptionError {
 
 impl MisaCCOptions {
     fn read_options() -> Result<MisaCCOptions, MisaCCOptionError> {
-        let path = dll_path()?.parent().unwrap().join("cc_options.yaml");
-        match File::open(&path) {
+        let options_path = DLL_DIR.clone().join("cc_options.yaml");
+        match File::open(&options_path) {
             Ok(file) => Ok(serde_yaml::from_reader(BufReader::new(file))?),
             Err(e) => if e.kind() == std::io::ErrorKind::NotFound {
                 let options = MisaCCOptions::default();
-                serde_yaml::to_writer(BufWriter::new(File::create(path)?), &options)?;
+                serde_yaml::to_writer(BufWriter::new(File::create(options_path)?), &options)?;
                 Ok(options)
             } else {
                 Err(e.into())
             }
         }
+    }
+    fn load_pathfinders(&self) -> HashMap<PathBuf, libloading::Library> {
+        let mut map = HashMap::new();
+        fn load_config(config: &BotConfig, map: &mut HashMap<PathBuf, libloading::Library>) {
+            if let Some(path) = &config.pathfinder {
+                match libloading::Library::new(DLL_DIR.clone().join(path)) {
+                    Ok(lib) => { map.insert(path.clone(), lib); },
+                    Err(err) => println!("Error loading {:?}: {}", path, err)
+                }
+            }
+        }
+        load_config(&self.ai_p1, &mut map);
+        load_config(&self.ai_p2, &mut map);
+        map
     }
 }
 
@@ -136,6 +147,7 @@ lazy_static! {
     ];
     static ref OPTIONS: MisaCCOptions = MisaCCOptions::read_options()
         .expect("Failed to read or create options file");
+    static ref PATHFINDERS: HashMap<PathBuf, libloading::Library> = OPTIONS.load_pathfinders();
 }
 
 fn create_interface(board: &Board, player: i32) -> cold_clear::Interface {
@@ -153,28 +165,28 @@ fn create_interface(board: &Board, player: i32) -> cold_clear::Interface {
 
 #[no_mangle]
 pub extern "C" fn TetrisAI(
-    overfield: *const c_int, field: *const c_int, field_w: c_int, field_h: c_int, b2b: c_int,
+    overfield: *const c_int, field_ptr: *const c_int, field_w: c_int, field_h: c_int, b2b: c_int,
     combo: c_int, next: *const c_char, hold: c_char, cur_can_hold: bool, active: c_char,
     x: i32, y: i32, spin: i32, canhold: bool, can180spin: bool, incoming_att: c_int,
     combo_table: *const c_int, max_depth: c_int, level: c_int, player: c_int)
     -> *const c_char {
-    assert!(!field.is_null(), "`field` was null");
+    assert!(!field_ptr.is_null(), "`field` was null");
     assert!(field_w == 10, "`field_w` was not 10");
     assert!(field_h == 22, "`field_h` was not 22");
-    let raw_field: &[c_int] = unsafe { std::slice::from_raw_parts(field, field_h as usize + 1) };
+    let raw_field: &[c_int] = unsafe { std::slice::from_raw_parts(field_ptr, field_h as usize + 1) };
     let mut field = [[false; 10]; 40];
     for (y, &row) in raw_field.iter().rev().enumerate() {
         for x in 0..10 {
             field[y][x] = (row & (1 << x)) != 0;
         }
     }
-    let next: &[c_char] = unsafe { std::slice::from_raw_parts(next, max_depth as usize) };
-    let next: Vec<Piece> = next.into_iter().map(|&p| Piece::from_char((p as u8) as char)).collect();
-    let hold = (hold as u8) as char;
-    let hold = if hold == ' ' {
+    let next_char: &[c_char] = unsafe { std::slice::from_raw_parts(next, max_depth as usize) };
+    let next: Vec<Piece> = next_char.iter().map(|&p| Piece::from_char((p as u8) as char)).collect();
+    let hold_char = (hold as u8) as char;
+    let hold = if hold_char == ' ' {
         None
     } else {
-        Some(Piece::from_char(hold))
+        Some(Piece::from_char(hold_char))
     };
     let mut state = STATE[player as usize].lock().unwrap();
     let mut board = Board::<u16>::new();
@@ -232,7 +244,12 @@ pub extern "C" fn TetrisAI(
     let bot = state.bot.as_mut().unwrap();
     bot.request_next_move(incoming_att as u32);
     state.last_move = if let Some((mv, _)) = bot.block_next_move() {
-        let mut moves = String::with_capacity(mv.inputs.len() + 2);
+        let pathfinder = &(if player == 0 {
+            &OPTIONS.ai_p1
+        } else {
+            &OPTIONS.ai_p2
+        }).pathfinder;
+        let mut moves = String::with_capacity(32);
         board.lock_piece(mv.expected_location);
         state.expected_field = board.get_field();
         state.expected_queue = next;
@@ -240,17 +257,59 @@ pub extern "C" fn TetrisAI(
         if mv.hold {
             moves.push('v');
         }
-        for mv in mv.inputs {
-            moves.push(match mv {
-                PieceMovement::Left => 'l',
-                PieceMovement::Right => 'r',
-                PieceMovement::Cw => 'c',
-                PieceMovement::Ccw => 'z',
-                PieceMovement::SonicDrop => 'D'
-            });
+        if let Some(path) = pathfinder {
+            let path_ptr = CString::new(" ".repeat(32)).unwrap().into_raw();
+            unsafe {
+                let find_path: libloading::Symbol<unsafe extern fn(
+                        path: *mut c_char,
+                        field: *const c_int,
+                        piece: c_char,
+                        x: c_int,
+                        y: c_int,
+                        rot: c_int,
+                        tspin: c_char
+                    )> = PATHFINDERS.get(path).unwrap().get(b"find_path").unwrap();
+                find_path(
+                    path_ptr,
+                    field_ptr,
+                    if !mv.hold {
+                        active
+                    } else if hold_char != ' ' {
+                        hold_char as u8 as c_char
+                    } else {
+                        next_char[0]
+                    },
+                    mv.expected_location.x,
+                    mv.expected_location.y,
+                    match mv.expected_location.kind.1 {
+                        RotationState::North => 0,
+                        RotationState::East => 1,
+                        RotationState::South => 2,
+                        RotationState::West => 3
+                    },
+                    (match mv.expected_location.tspin {
+                        TspinStatus::None => ' ',
+                        TspinStatus::Mini => 't',
+                        TspinStatus::Full => 'T',
+                        TspinStatus::PersistentFull => '+'
+                    } as u8) as c_char
+                );
+                moves.push_str(CString::from_raw(path_ptr).to_str().unwrap());
+            }
+        } else {
+            for mv in mv.inputs {
+                moves.push(match mv {
+                    PieceMovement::Left => 'l',
+                    PieceMovement::Right => 'r',
+                    PieceMovement::Cw => 'c',
+                    PieceMovement::Ccw => 'z',
+                    PieceMovement::SonicDrop => 'D'
+                });
+            }
         }
         moves.push('V');
         CString::new(moves).unwrap()
+        
     } else {
         CString::new("V").unwrap()
     };
