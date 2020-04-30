@@ -16,6 +16,7 @@ libtetris = { path = "../libtetris" }
 lazy_static = "1.4.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_yaml = "0.8.11"
+libloading = "0.6.1"
 
 [dependencies.winapi]
 version = "0.3.8"
