@@ -8,5 +8,6 @@ members = [
     "c-api",
     "compare",
     "optimizer",
-    "misamino-dll"
+    "misamino-dll",
+    "das-pathfinder-dll"
 ]
