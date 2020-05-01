@@ -6,6 +6,7 @@ use libtetris::{ Board, Piece, PieceMovement, RotationState, TspinStatus };
 use serde::{ Serialize, Deserialize };
 use std::path::PathBuf;
 use std::io::{ BufReader, BufWriter };
+use std::io::Write;
 use std::fs::File;
 use std::collections::HashMap;
 
@@ -20,7 +21,7 @@ pub extern "C" fn AIDllVersion() -> c_int {
 
 #[no_mangle]
 pub extern "C" fn AIName(level: c_int) -> *mut c_char {
-    let options = &OPTIONS.ai_p1;
+    let _options = &OPTIONS.ai_p1;
     //Pretty sure this leaks memory but hopefully MisaMino Client just calls it once
     CString::new(format!("Cold Clear LVL {}", level)).unwrap().into_raw()
 }
@@ -117,7 +118,9 @@ impl MisaCCOptions {
             Ok(file) => Ok(serde_yaml::from_reader(BufReader::new(file))?),
             Err(e) => if e.kind() == std::io::ErrorKind::NotFound {
                 let options = MisaCCOptions::default();
-                serde_yaml::to_writer(BufWriter::new(File::create(options_path)?), &options)?;
+                let mut file = BufWriter::new(File::create(options_path)?);
+                write!(&mut file, "{}", include_str!("options-header"))?;
+                serde_yaml::to_writer(file, &options)?;
                 Ok(options)
             } else {
                 Err(e.into())
