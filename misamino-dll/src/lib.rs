@@ -166,19 +166,6 @@ fn create_interface(board: &Board, player: i32) -> cold_clear::Interface {
     )
 }
 
-fn create_interface(board: &Board, player: i32) -> cold_clear::Interface {
-    let config = if player == 0 {
-        OPTIONS.ai_p1.clone()
-    } else {
-        OPTIONS.ai_p2.clone()
-    };
-    cold_clear::Interface::launch(
-        board.clone(),
-        config.options,
-        config.weights
-    )
-}
-
 #[no_mangle]
 pub extern "C" fn TetrisAI(
     overfield: *const c_int, field_ptr: *const c_int, field_w: c_int, field_h: c_int, b2b: c_int,
@@ -236,20 +223,16 @@ pub extern "C" fn TetrisAI(
         }
         
         if piece_dropped {
-            println!("Misdrop or garbage!");
             state.bot.as_mut().unwrap().reset(field, b2b != 0, combo as u32);
         } else {
-            println!("Returned old calculation for board");
             return state.last_move.as_ptr();
         }
         if state.expected_queue.iter().zip(next.iter()).any(|p| *p.0 != *p.1) {
-            println!("Detected new game. Reset bot.");
             state.bot = None;
             state.bot = Some(create_interface(&board, player));
             update_queue = false;
         }
         if state.expected_queue.iter().zip(next.iter()).any(|p| *p.0 != *p.1) {
-            println!("Detected new game. Reset bot.");
             state.bot = None;
             state.bot = Some(create_interface(&board, player));
             update_queue = false;
@@ -319,6 +302,7 @@ pub extern "C" fn TetrisAI(
                 moves.push_str(CString::from_raw(path_ptr).to_str().unwrap());
             }
         } else {
+            moves.push('d');
             for mv in mv.inputs {
                 moves.push(match mv {
                     PieceMovement::Left => 'l',
@@ -331,7 +315,6 @@ pub extern "C" fn TetrisAI(
         }
         moves.push('V');
         CString::new(moves).unwrap()
-        
     } else {
         CString::new("V").unwrap()
     };
