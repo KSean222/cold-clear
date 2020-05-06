@@ -12,7 +12,7 @@ const BOARD_MOVES: [BoardMove; 7] = [
     BoardMove::RotRight
 ];
 
-#[derive(Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
 enum BoardMove {
     DasLeft,
     DasRight,
@@ -79,7 +79,6 @@ pub extern "C" fn find_path(
                     });
                     if child_pos == target {
                         let mut moves = Vec::new();
-                        moves.push(mv);
                         let mut pos = child_pos;
                         loop {
                             let &(parent_pos, mv) = nodes.get(&pos).unwrap();
@@ -93,9 +92,12 @@ pub extern "C" fn find_path(
                         if moves_len > 32 {
                             unreachable!("Path found could not fit in buffer.");
                         }
-                        for (i, mv) in moves.into_iter().skip(1).rev().enumerate() {
+                        unsafe {
+                            *path = 'd' as u8 as c_char;
+                        }
+                        for (i, mv) in moves.into_iter().rev().enumerate() {
                             unsafe {
-                                *path.add(i) = (match mv {
+                                *path.add(i + 1) = (match mv {
                                     BoardMove::DasLeft => 'L',
                                     BoardMove::DasRight => 'R',
                                     BoardMove::SonicDrop => 'D',
@@ -107,7 +109,7 @@ pub extern "C" fn find_path(
                             }
                         }
                         unsafe {
-                            *path.add(moves_len) = 0;
+                            *path.add(moves_len + 1) = 0;
                         }
                         return;
                     }
