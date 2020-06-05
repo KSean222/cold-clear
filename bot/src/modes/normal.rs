@@ -1,5 +1,6 @@
 use serde::{ Serialize, Deserialize };
 use enum_map::EnumMap;
+use enumset::EnumSet;
 use libtetris::*;
 use crate::tree::{ ChildData, TreeState, NodeId };
 use crate::{ Options, Info };
@@ -146,7 +147,8 @@ impl<E: Evaluator> BotState<E> {
 
 impl Thinker {
     pub fn think<E: Evaluator>(self, eval: &E) -> ThinkResult<E::Value, E::Reward> {
-        if let Err(possibilities) = self.board.get_next_piece() {
+        let possibilities = EnumSet::<Piece>::all();
+        if let Err(_) = self.board.get_next_piece() {
             // Next unknown (implies hold is known) => Speculate
             if self.options.speculate {
                 let mut children = EnumMap::new();
@@ -165,11 +167,6 @@ impl Thinker {
                 // Next known, hold unknown => Speculate
                 if self.options.speculate {
                     let mut children = EnumMap::new();
-                    let possibilities = {
-                        let mut b = self.board.clone();
-                        b.advance_queue();
-                        b.get_next_piece().unwrap_err()
-                    };
                     for p in possibilities {
                         let mut b = self.board.clone();
                         b.add_next_piece(p);
