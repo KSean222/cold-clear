@@ -1,5 +1,5 @@
 use std::os::raw::*;
-use libtetris::{ Board, Piece, PieceState, RotationState, FallingPiece, TspinStatus };
+use libtetris::*;
 use std::collections::{ HashMap, VecDeque };
 
 const BOARD_MOVES: [BoardMove; 7] = [
@@ -51,11 +51,10 @@ pub extern "C" fn find_path(
             ' ' => TspinStatus::None,
             't' => TspinStatus::Mini,
             'T' => TspinStatus::Full,
-            '+' => TspinStatus::PersistentFull,
             tspin => unreachable!("Invalid T-Spin type: {}", tspin)
         }
     };
-    if let Some(piece) = FallingPiece::spawn(target.kind.0, &board) {
+    if let Some(piece) = SpawnRule::Row21AndFall.spawn(target.kind.0, &board) {
         let mut queue = VecDeque::new();
         let mut nodes = HashMap::new();
         queue.push_back(piece);
@@ -92,12 +91,9 @@ pub extern "C" fn find_path(
                         if moves_len > 32 {
                             unreachable!("Path found could not fit in buffer.");
                         }
-                        unsafe {
-                            *path = 'd' as u8 as c_char;
-                        }
                         for (i, mv) in moves.into_iter().rev().enumerate() {
                             unsafe {
-                                *path.add(i + 1) = (match mv {
+                                *path.add(i) = (match mv {
                                     BoardMove::DasLeft => 'L',
                                     BoardMove::DasRight => 'R',
                                     BoardMove::SonicDrop => 'D',
@@ -109,7 +105,7 @@ pub extern "C" fn find_path(
                             }
                         }
                         unsafe {
-                            *path.add(moves_len + 1) = 0;
+                            *path.add(moves_len) = 0;
                         }
                         return;
                     }

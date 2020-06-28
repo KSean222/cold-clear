@@ -2,7 +2,7 @@ use std::ffi::CString;
 use std::os::raw::*;
 use lazy_static::lazy_static;
 use std::sync::Mutex;
-use libtetris::{ Board, Piece, PieceMovement, RotationState, TspinStatus };
+use libtetris::*;
 use serde::{ Serialize, Deserialize };
 use std::path::PathBuf;
 use std::io::{ BufReader, BufWriter };
@@ -57,7 +57,10 @@ struct BotConfig {
 impl Default for BotConfig {
     fn default() -> BotConfig {
         BotConfig {
-            options: cold_clear::Options::default(),
+            options: cold_clear::Options {
+                spawn_rule: SpawnRule::Row21AndFall,
+                ..Default::default()
+            },
             pathfinder: None,
             weights: cold_clear::evaluation::Standard::fast_config()
         }
@@ -296,22 +299,18 @@ pub extern "C" fn TetrisAI(
                         TspinStatus::None => ' ',
                         TspinStatus::Mini => 't',
                         TspinStatus::Full => 'T',
-                        TspinStatus::PersistentFull => '+'
                     } as u8) as c_char
                 );
                 moves.push_str(CString::from_raw(path_ptr).to_str().unwrap());
             }
         } else {
-            moves.push('d');
-            for mv in mv.inputs {
-                moves.push(match mv {
-                    PieceMovement::Left => 'l',
-                    PieceMovement::Right => 'r',
-                    PieceMovement::Cw => 'c',
-                    PieceMovement::Ccw => 'z',
-                    PieceMovement::SonicDrop => 'D'
-                });
-            }
+            moves.extend(mv.inputs.iter().map(|&mv| match mv {
+                PieceMovement::Left => 'l',
+                PieceMovement::Right => 'r',
+                PieceMovement::Cw => 'c',
+                PieceMovement::Ccw => 'z',
+                PieceMovement::SonicDrop => 'D'
+            }));
         }
         moves.push('V');
         CString::new(moves).unwrap()
