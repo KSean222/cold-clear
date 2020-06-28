@@ -235,11 +235,6 @@ pub extern "C" fn TetrisAI(
             state.bot = Some(create_interface(&board, player));
             update_queue = false;
         }
-        if state.expected_queue.iter().zip(next.iter()).any(|p| *p.0 != *p.1) {
-            state.bot = None;
-            state.bot = Some(create_interface(&board, player));
-            update_queue = false;
-        }
     }
     if update_queue {
         if state.prev_hold.is_none() && hold.is_some() {
