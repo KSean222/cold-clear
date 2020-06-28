@@ -198,7 +198,7 @@ pub extern "C" fn TetrisAI(
     let mut board = Board::<u16>::new();
     board.add_next_piece(Piece::from_char((active as u8) as char));
     board.set_field(field);
-    for &piece in &next {
+    for &piece in next.iter().take(level as usize) {
         board.add_next_piece(piece);
     }
     board.hold_piece = hold;
@@ -237,10 +237,12 @@ pub extern "C" fn TetrisAI(
         }
     }
     if update_queue {
-        if state.prev_hold.is_none() && hold.is_some() {
-            state.bot.as_mut().unwrap().add_next_piece(next[next.len() - 2]);
+        if state.prev_hold.is_none() && hold.is_some() && level > 1 {
+            state.bot.as_mut().unwrap().add_next_piece(next[level as usize - 2]);
         }
-        state.bot.as_mut().unwrap().add_next_piece(next[next.len() - 1]);
+        if level > 0 {
+            state.bot.as_mut().unwrap().add_next_piece(next[level as usize - 1]);
+        }
     }
     state.prev_hold = hold;
     state.prev_field = field;
