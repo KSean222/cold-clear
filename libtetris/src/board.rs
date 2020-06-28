@@ -42,6 +42,21 @@ impl<R: Row> Board<R> {
         }
     }
 
+    /// Creates a board with existing field, remain pieces in the bag, hold piece, back-to-back status and combo count.
+    pub fn new_with_state(field: [[bool; 10]; 40], bag_remain: EnumSet<Piece>, hold: Option<Piece>, b2b: bool, combo: u32) -> Self {
+        let mut board = Board {
+            cells: [*R::EMPTY; 40].into(),
+            column_heights: [0; 10],
+            combo: combo,
+            b2b_bonus: b2b,
+            hold_piece: hold,
+            next_pieces: VecDeque::new(),
+            bag: bag_remain,
+        };
+        board.set_field(field);
+        board
+    }
+
     /// Randomly selects a piece from the bag.
     /// 
     /// This function does not remove the generated piece from the bag.
@@ -117,19 +132,19 @@ impl<R: Row> Board<R> {
     pub fn obstructed(&self, piece: &FallingPiece) -> bool {
         piece.cells()
             .iter()
-            .any(|&(x, y, _)| self.occupied(x, y))
+            .any(|&(x, y)| self.occupied(x, y))
     }
 
     pub fn above_stack(&self, piece: &FallingPiece) -> bool {
         piece.cells()
             .iter()
-            .all(|&(x, y, _)| y >= self.column_heights[x as usize])
+            .all(|&(x, y)| y >= self.column_heights[x as usize])
     }
 
     pub fn on_stack(&self, piece: &FallingPiece) -> bool {
         piece.cells()
             .iter()
-            .any(|&(x, y, _)| self.occupied(x, y - 1))
+            .any(|&(x, y)| self.occupied(x, y - 1))
     }
 
     /// Does all logic associated with locking a piece.
@@ -138,7 +153,7 @@ impl<R: Row> Board<R> {
     /// state, detects perfect clears, detects lockout.
     pub fn lock_piece(&mut self, piece: FallingPiece) -> LockResult {
         let mut locked_out = true;
-        for &(x, y, _) in &piece.cells() {
+        for &(x, y) in &piece.cells() {
             self.cells[y as usize].set(x as usize, piece.kind.0.color());
             if self.column_heights[x as usize] < y+1 {
                 self.column_heights[x as usize] = y+1;

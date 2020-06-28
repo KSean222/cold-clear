@@ -163,5 +163,9 @@ fn run(
                 Err(_) => break
             }
         }
+
+        if bot.is_dead() {
+            break
+        }
     }
 }

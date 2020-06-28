@@ -13,28 +13,19 @@ pub struct FallingPiece {
 }
 
 impl FallingPiece {
-    pub fn spawn<R: Row>(piece: Piece, board: &Board<R>) -> Option<FallingPiece> {
-        let mut this = FallingPiece {
-            kind: PieceState(piece, RotationState::North),
-            x: 4, y: 20,
-            tspin: TspinStatus::None
-        };
-
-        if board.obstructed(&this) {
-            None
-        } else {
-            this.y -= 1;
-            if board.obstructed(&this) {
-                this.y += 1;
-            }
-
-            Some(this)
+    #[inline]
+    pub fn cells(&self) -> [(i32, i32); 4] {
+        let mut cells = self.kind.cells();
+        for (dx, dy) in cells.iter_mut() {
+            *dx += self.x;
+            *dy += self.y;
         }
+        cells
     }
 
     #[inline]
-    pub fn cells(&self) -> [(i32, i32, EnumSet<Direction>); 4] {
-        let mut cells = self.kind.cells();
+    pub fn cells_with_connections(&self) -> [(i32, i32, EnumSet<Direction>); 4] {
+        let mut cells = self.kind.cells_with_connections();
         for (dx, dy, _) in cells.iter_mut() {
             *dx += self.x;
             *dy += self.y;
@@ -58,7 +49,7 @@ impl FallingPiece {
     pub fn sonic_drop<R: Row>(&mut self, board: &Board<R>) -> bool {
         let drop_by = self.cells()
             .iter()
-            .map(|&(x, y, _)| y - board.column_heights()[x as usize])
+            .map(|&(x, y)| y - board.column_heights()[x as usize])
             .min().unwrap();
         if drop_by > 0 {
             self.tspin = TspinStatus::None;
@@ -94,7 +85,7 @@ impl FallingPiece {
             self.x = initial.x + dx;
             self.y = initial.y + dy;
             if !board.obstructed(self) {
-                if target.0 == Piece::T && self.tspin != TspinStatus::PersistentFull {
+                if target.0 == Piece::T {
                     let mut mini_corners = 0;
                     for &(dx, dy) in &target.1.mini_tspin_corners() {
                         if board.occupied(self.x + dx, self.y + dy) {
@@ -110,19 +101,7 @@ impl FallingPiece {
                     }
 
                     if non_mini_corners + mini_corners >= 3 {
-                        if i == 4 {
-                            // Rotation point 5 is never a Mini T-Spin
-
-                            // The leaked 2009 guideline says that rotations made after using the
-                            // TST twist stay as full tspins, not minis. Example:
-                            // http://harddrop.com/fumen/?v115@4gB8IeA8CeE8AeH8CeG8BeD8JeVBnvhC9rflrBAAA
-                            // That guideline contains no examples of this, and this isn't the case
-                            // in recent guideline games such as Puyo Puyo Tetris.
-                            // For now, we won't implement it.
-                            
-                            // self.tspin = TspinStatus::PersistentFull;
-                            self.tspin = TspinStatus::Full;
-                        } else if mini_corners == 2 {
+                        if i == 4 || mini_corners == 2 {
                             self.tspin = TspinStatus::Full;
                         } else {
                             self.tspin = TspinStatus::Mini;
@@ -178,7 +157,6 @@ pub enum TspinStatus {
     None,
     Mini,
     Full,
-    PersistentFull
 }
 
 impl RotationState {
@@ -235,75 +213,71 @@ impl PieceState {
     /// Returns the cells this piece and orientation occupy relative to rotation point 1, as well
     /// as the connection directions, in no particular order.
     #[inline]
-    pub fn cells(&self) -> [(i32, i32, EnumSet<Direction>); 4] {
-        use Direction::*;
-
-        let mut cells = match self.0 {
-            Piece::I => [
-                (-1, 0, enum_set!(Right)),
-                ( 0, 0, enum_set!(Left | Right)),
-                ( 1, 0, enum_set!(Left | Right)),
-                ( 2, 0, enum_set!(Left)),
-            ],
-            Piece::O => [
-                (0, 0, enum_set!(Right | Up)),
-                (1, 0, enum_set!(Left | Up)),
-                (0, 1, enum_set!(Right | Down)),
-                (1, 1, enum_set!(Left | Down)),
-            ],
-            Piece::L => [
-                (-1, 0, enum_set!(Right)),
-                ( 0, 0, enum_set!(Left | Right)),
-                ( 1, 0, enum_set!(Left | Up)),
-                ( 1, 1, enum_set!(Down))
-            ],
-            Piece::J => [
-                (-1, 0, enum_set!(Right | Up)),
-                ( 0, 0, enum_set!(Left | Right)),
-                ( 1, 0, enum_set!(Left)),
-                (-1, 1, enum_set!(Down))
-            ],
-            Piece::T => [
-                (-1, 0, enum_set!(Right)),
-                (0,  0, enum_set!(Left | Right | Up)),
-                (1,  0, enum_set!(Left)),
-                (0,  1, enum_set!(Down))
-            ],
-            Piece::S => [
-                (-1, 0, enum_set!(Right)),
-                ( 0, 0, enum_set!(Left | Up)),
-                ( 0, 1, enum_set!(Down | Right)),
-                ( 1, 1, enum_set!(Left))
-            ],
-            Piece::Z => [
-                (-1, 1, enum_set!(Right)),
-                ( 0, 1, enum_set!(Left | Down)),
-                ( 0, 0, enum_set!(Up | Right)),
-                ( 1, 0, enum_set!(Left))
-            ],
+    pub fn cells(&self) -> [(i32, i32); 4] {
+        let rotate = |x: i32, y| match self.1 {
+            RotationState::North => (x, y),
+            RotationState::East => (y, -x),
+            RotationState::South => (-x, -y),
+            RotationState::West => (-y, x)
         };
-
-        for (x, y, d) in &mut cells {
-            match self.1 {
-                RotationState::North => {},
-                RotationState::East => {
-                    *x = -*x;
-                    std::mem::swap(x, y);
-                    *d = d.iter().map(Direction::cw).collect();
-                }
-                RotationState::South => {
-                    *x = -*x;
-                    *y = -*y;
-                    *d = d.iter().map(Direction::flip).collect();
-                }
-                RotationState::West => {
-                    *y = -*y;
-                    std::mem::swap(x, y);
-                    *d = d.iter().map(Direction::ccw).collect();
-                }
-            }
+        match self.0 {
+            Piece::I => [rotate(-1, 0), rotate( 0, 0), rotate( 1, 0), rotate( 2, 0)],
+            Piece::O => [rotate( 0, 0), rotate( 1, 0), rotate( 0, 1), rotate( 1, 1)],
+            Piece::L => [rotate(-1, 0), rotate( 0, 0), rotate( 1, 0), rotate( 1, 1)],
+            Piece::J => [rotate(-1, 0), rotate( 0, 0), rotate( 1, 0), rotate(-1, 1)],
+            Piece::T => [rotate(-1, 0), rotate( 0, 0), rotate( 1, 0), rotate( 0, 1)],
+            Piece::S => [rotate(-1, 0), rotate( 0, 0), rotate( 0, 1), rotate( 1, 1)],
+            Piece::Z => [rotate(-1, 1), rotate( 0, 1), rotate( 0, 0), rotate( 1, 0)],
         }
-        cells
+    }
+
+    pub fn cells_with_connections(&self) -> [(i32, i32, EnumSet<Direction>); 4] {
+        use Direction::*;
+        let rotate = |d: EnumSet<_>| match self.1 {
+            RotationState::North => d,
+            RotationState::East => d.iter().map(Direction::cw).collect(),
+            RotationState::South => d.iter().map(Direction::flip).collect(),
+            RotationState::West => d.iter().map(Direction::ccw).collect()
+        };
+        let cells = self.cells();
+        [
+            (cells[0].0, cells[0].1, rotate(match self.0 {
+                Piece::I => enum_set!(Right),
+                Piece::O => enum_set!(Right | Up),
+                Piece::L => enum_set!(Right),
+                Piece::J => enum_set!(Right | Up),
+                Piece::T => enum_set!(Right),
+                Piece::S => enum_set!(Right),
+                Piece::Z => enum_set!(Right),
+            })),
+            (cells[1].0, cells[1].1, rotate(match self.0 {
+                Piece::I => enum_set!(Left | Right),
+                Piece::O => enum_set!(Left | Up),
+                Piece::L => enum_set!(Left | Right),
+                Piece::J => enum_set!(Left | Right),
+                Piece::T => enum_set!(Left | Right | Up),
+                Piece::S => enum_set!(Left | Up),
+                Piece::Z => enum_set!(Left | Down),
+            })),
+            (cells[2].0, cells[2].1, rotate(match self.0 {
+                Piece::I => enum_set!(Left | Right),
+                Piece::O => enum_set!(Right | Down),
+                Piece::L => enum_set!(Left | Up),
+                Piece::J => enum_set!(Left),
+                Piece::T => enum_set!(Left),
+                Piece::S => enum_set!(Down | Right),
+                Piece::Z => enum_set!(Up | Right),
+            })),
+            (cells[3].0, cells[3].1, rotate(match self.0 {
+                Piece::I => enum_set!(Left),
+                Piece::O => enum_set!(Left | Down),
+                Piece::L => enum_set!(Down),
+                Piece::J => enum_set!(Down),
+                Piece::T => enum_set!(Down),
+                Piece::S => enum_set!(Left),
+                Piece::Z => enum_set!(Left),
+            })),
+        ]
     }
 
     /// Returns the five rotation points associated with this piece and orientation.
@@ -439,5 +413,44 @@ impl Direction {
             Direction::Down => Direction::Up,
             Direction::Left => Direction::Right,
         }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, Serialize, Deserialize)]
+pub enum SpawnRule {
+    Row19Or20,
+    Row21AndFall
+}
+
+impl SpawnRule {
+    pub fn spawn<R: Row>(self, piece: Piece, board: &Board<R>) -> Option<FallingPiece> {
+        match self {
+            SpawnRule::Row19Or20 => {
+                let mut spawned = FallingPiece {
+                    kind: PieceState(piece, RotationState::North),
+                    x: 4, y: 19,
+                    tspin: TspinStatus::None
+                };
+                if !board.obstructed(&spawned) {
+                    return Some(spawned);
+                }
+                spawned.y += 1;
+                if !board.obstructed(&spawned) {
+                    return Some(spawned);
+                }
+            }
+            SpawnRule::Row21AndFall => {
+                let mut spawned = FallingPiece {
+                    kind: PieceState(piece, RotationState::North),
+                    x: 4, y: 21,
+                    tspin: TspinStatus::None
+                };
+                if !board.obstructed(&spawned) {
+                    spawned.shift(board, 0, -1);
+                    return Some(spawned);
+                }
+            }
+        }
+        None
     }
 }

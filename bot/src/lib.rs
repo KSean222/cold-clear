@@ -23,8 +23,10 @@ pub use crate::modes::normal::{ BotState, ThinkResult, Thinker };
 #[serde(default)]
 pub struct Options {
     pub mode: crate::moves::MovementMode,
+    pub spawn_rule: SpawnRule,
     pub use_hold: bool,
     pub speculate: bool,
+    pub pcloop: bool,
     pub min_nodes: u32,
     pub max_nodes: u32,
     pub threads: u32
@@ -51,6 +53,7 @@ pub struct Info {
     pub plan: Vec<(FallingPiece, LockResult)>
 }
 
+#[derive(Serialize, Deserialize)]
 pub enum BotPollState {
     Waiting,
     Dead
@@ -60,8 +63,10 @@ impl Default for Options {
     fn default() -> Self {
         Options {
             mode: crate::moves::MovementMode::ZeroG,
+            spawn_rule: SpawnRule::Row19Or20,
             use_hold: true,
             speculate: true,
+            pcloop: false,
             min_nodes: 0,
             max_nodes: 4_000_000_000,
             threads: 1
