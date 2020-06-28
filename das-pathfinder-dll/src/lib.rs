@@ -79,12 +79,18 @@ pub extern "C" fn find_path(
                     if child_pos == target {
                         let mut moves = Vec::new();
                         let mut pos = child_pos;
+                        let mut skip = true;
                         loop {
                             let &(parent_pos, mv) = nodes.get(&pos).unwrap();
                             if pos == parent_pos {
                                 break;
                             }
-                            moves.push(mv);
+                            if mv != BoardMove::SonicDrop {
+                                skip = false;
+                            }
+                            if !skip {
+                                moves.push(mv);
+                            }
                             pos = parent_pos;
                         }
                         let moves_len = moves.len();
