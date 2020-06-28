@@ -1,4 +1,4 @@
-use std::ffi::CString;
+use std::ffi::{ CString, CStr };
 use std::os::raw::*;
 use lazy_static::lazy_static;
 use std::sync::Mutex;
@@ -24,6 +24,12 @@ pub extern "C" fn AIName(level: c_int) -> *mut c_char {
     let _options = &OPTIONS.ai_p1;
     //Pretty sure this leaks memory but hopefully MisaMino Client just calls it once
     CString::new(format!("Cold Clear LVL {}", level)).unwrap().into_raw()
+}
+
+//tetris_ai_runner compatibility
+#[no_mangle]
+pub extern "C" fn Name() -> *const c_char {
+    CStr::from_bytes_with_nul(b"Cold Clear\0").unwrap().as_ptr()
 }
 
 struct MisaInterface {
