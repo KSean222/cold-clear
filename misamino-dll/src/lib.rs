@@ -1,14 +1,16 @@
 use std::ffi::{ CString, CStr };
 use std::os::raw::*;
-use lazy_static::lazy_static;
 use std::sync::Mutex;
+use std::path::PathBuf;
+use std::io::{ BufReader, BufWriter, Write };
+use std::fs::File;
+
+use lazy_static::lazy_static;
 use libtetris::*;
 use serde::{ Serialize, Deserialize };
-use std::path::PathBuf;
-use std::io::{ BufReader, BufWriter };
-use std::io::Write;
-use std::fs::File;
-use std::collections::HashMap;
+
+mod das_pf;
+use das_pf::DasPieceMovement;
 
 lazy_static! {
     static ref DLL_DIR: PathBuf = dll_path().unwrap().parent().unwrap().to_path_buf();
@@ -53,10 +55,16 @@ fn create_misa_interface() -> Mutex<MisaInterface> {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+enum PathfinderMode {
+    Hypertap,
+    Das
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(default)]
 struct BotConfig {
     options: cold_clear::Options,
-    pathfinder: Option<PathBuf>,
+    pathfinder: PathfinderMode,
     weights: cold_clear::evaluation::Standard,
 }
 
@@ -67,7 +75,7 @@ impl Default for BotConfig {
                 spawn_rule: SpawnRule::Row21AndFall,
                 ..Default::default()
             },
-            pathfinder: None,
+            pathfinder: PathfinderMode::Das,
             weights: cold_clear::evaluation::Standard::fast_config()
         }
     }
@@ -136,20 +144,6 @@ impl MisaCCOptions {
             }
         }
     }
-    fn load_pathfinders(&self) -> HashMap<PathBuf, libloading::Library> {
-        let mut map = HashMap::new();
-        fn load_config(config: &BotConfig, map: &mut HashMap<PathBuf, libloading::Library>) {
-            if let Some(path) = &config.pathfinder {
-                match libloading::Library::new(DLL_DIR.clone().join(path)) {
-                    Ok(lib) => { map.insert(path.clone(), lib); },
-                    Err(err) => println!("Error loading {:?}: {}", path, err)
-                }
-            }
-        }
-        load_config(&self.ai_p1, &mut map);
-        load_config(&self.ai_p2, &mut map);
-        map
-    }
 }
 
 lazy_static! {
@@ -159,7 +153,6 @@ lazy_static! {
     ];
     static ref OPTIONS: MisaCCOptions = MisaCCOptions::read_options()
         .expect("Failed to read or create options file");
-    static ref PATHFINDERS: HashMap<PathBuf, libloading::Library> = OPTIONS.load_pathfinders();
 }
 
 fn create_interface(board: &Board, player: i32) -> cold_clear::Interface {
@@ -255,67 +248,40 @@ pub extern "C" fn TetrisAI(
     let bot = state.bot.as_mut().unwrap();
     bot.request_next_move(incoming_att as u32);
     state.last_move = if let Some((mv, _)) = bot.block_next_move() {
-        let pathfinder = &(if player == 0 {
+        let mut moves = String::with_capacity(32);
+        if mv.hold {
+            moves.push('v');
+        }
+        let options = &(if player == 0 {
             &OPTIONS.ai_p1
         } else {
             &OPTIONS.ai_p2
-        }).pathfinder;
-        let mut moves = String::with_capacity(32);
+        });
+        let inputs = match options.pathfinder {
+            PathfinderMode::Hypertap => mv.inputs
+                .into_iter()
+                .map(|mv| mv.into())
+                .collect(),
+            PathfinderMode::Das => das_pf::find_das_path(
+                field, 
+                options.options.spawn_rule.spawn(mv.expected_location.kind.0, &board).unwrap(),
+                mv.expected_location
+            ).unwrap_or(Vec::new())
+        };
+        moves.extend(inputs.iter().map(|&mv| match mv {
+            DasPieceMovement::DasLeft => 'L',
+            DasPieceMovement::DasRight => 'R',
+            DasPieceMovement::Left => 'l',
+            DasPieceMovement::Right => 'r',
+            DasPieceMovement::Cw => 'c',
+            DasPieceMovement::Ccw => 'z',
+            DasPieceMovement::SonicDrop => 'D'
+        }));
+        moves.push('V');
         board.lock_piece(mv.expected_location);
         state.expected_field = board.get_field();
         state.expected_queue = next;
         state.expected_queue.remove(0);
-        if mv.hold {
-            moves.push('v');
-        }
-        if let Some(path) = pathfinder {
-            let path_ptr = CString::new(" ".repeat(32)).unwrap().into_raw();
-            unsafe {
-                let find_path: libloading::Symbol<unsafe extern fn(
-                        path: *mut c_char,
-                        field: *const c_int,
-                        piece: c_char,
-                        x: c_int,
-                        y: c_int,
-                        rot: c_int,
-                        tspin: c_char
-                    )> = PATHFINDERS.get(path).unwrap().get(b"find_path").unwrap();
-                find_path(
-                    path_ptr,
-                    field_ptr,
-                    if !mv.hold {
-                        active
-                    } else if hold_char != ' ' {
-                        hold_char as u8 as c_char
-                    } else {
-                        next_char[0]
-                    },
-                    mv.expected_location.x,
-                    mv.expected_location.y,
-                    match mv.expected_location.kind.1 {
-                        RotationState::North => 0,
-                        RotationState::East => 1,
-                        RotationState::South => 2,
-                        RotationState::West => 3
-                    },
-                    (match mv.expected_location.tspin {
-                        TspinStatus::None => ' ',
-                        TspinStatus::Mini => 't',
-                        TspinStatus::Full => 'T',
-                    } as u8) as c_char
-                );
-                moves.push_str(CString::from_raw(path_ptr).to_str().unwrap());
-            }
-        } else {
-            moves.extend(mv.inputs.iter().map(|&mv| match mv {
-                PieceMovement::Left => 'l',
-                PieceMovement::Right => 'r',
-                PieceMovement::Cw => 'c',
-                PieceMovement::Ccw => 'z',
-                PieceMovement::SonicDrop => 'D'
-            }));
-        }
-        moves.push('V');
         CString::new(moves).unwrap()
     } else {
         CString::new("V").unwrap()

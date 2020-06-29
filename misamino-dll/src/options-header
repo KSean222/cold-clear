@@ -1,15 +1,10 @@
 # The default max_nodes under bot options is the largest valid value.
 # However, you should probably limit this value to something appropriate
 # for your setup, as otherwise Cold Clear will keep thinking unboundedly
-# even after the game has ended.
+# even after the game has ended, consuming more and more memory.
 # Valid movement modes are ZeroG (default), TwentyG, and HardDropOnly.
-# Note that this information is ignored when using custom pathfinders.
-# For info on writing a custom pathfinder, view the example pathfinder
-# in the repository's `das-pathfinder-dll` crate.
+# Valid pathfinder modes are Das (default), and Hypertap.
 # The `sub_name` field is completely ignored as it cannot be displayed.
 # This version of Cold Clear uses `fast_config`, which is optimised for
 # high-speed games. As such, it will not stack as high and skim more.
-# This version of Cold Clear also misdrops far more, which is why it is
-# advised to use `das_pf.dll` to reduce misdrops. Note that Cold Clear
-# still misdrops frequently even with the DAS pathfinder.
 # Cold Clear vs Cold Clear is untested. This binary is prone to crashes.
