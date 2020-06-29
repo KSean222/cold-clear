@@ -208,19 +208,14 @@ pub extern "C" fn TetrisAI(
         state.bot = Some(create_interface(&board, player));
         update_queue = false;
     }
-    let mut unexpected_field = false;
+    let mut unexpected = false;
     for (i, &row) in field.iter().enumerate() {
         if state.expected_field[i] != row {
-            unexpected_field = true;
+            unexpected = true;
             break;
         }
     }
-    let unexpected_queue = state.expected_queue.iter().zip(next.iter()).any(|p| *p.0 != *p.1);
-    if unexpected_queue {
-        state.bot = None;
-        state.bot = Some(create_interface(&board, player));
-        update_queue = false;
-    } else if unexpected_field {
+    if unexpected {
         let mut piece_dropped = false;
         for (i, &row) in field.iter().enumerate() {
             if state.prev_field[i] != row {
@@ -228,10 +223,16 @@ pub extern "C" fn TetrisAI(
                 break;
             }
         }
+        
         if piece_dropped {
             state.bot.as_mut().unwrap().reset(field, b2b != 0, combo as u32);
         } else {
             return state.last_move.as_ptr();
+        }
+        if state.expected_queue.iter().zip(next.iter()).any(|p| *p.0 != *p.1) {
+            state.bot = None;
+            state.bot = Some(create_interface(&board, player));
+            update_queue = false;
         }
     }
     if update_queue {
@@ -280,7 +281,7 @@ pub extern "C" fn TetrisAI(
         board.lock_piece(mv.expected_location);
         state.expected_field = board.get_field();
         state.expected_queue = next;
-        state.expected_queue.drain(0..(1 + mv.hold as usize));
+        state.expected_queue.remove(0);
         CString::new(moves).unwrap()
     } else {
         CString::new("V").unwrap()
