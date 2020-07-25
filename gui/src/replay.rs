@@ -31,7 +31,8 @@ impl ReplayGame {
         let battle = Battle::new(
             replay.p1_config, replay.p2_config,
             replay.p1_seed, replay.p2_seed,
-            replay.garbage_seed
+            replay.garbage_seed,
+            replay.mode
         );
         ReplayGame {
             ui: BattleUi::new(&battle, replay.p1_name, replay.p2_name),
@@ -80,7 +81,8 @@ impl crate::State for ReplayGame {
                 let battle = Battle::new(
                     replay.p1_config, replay.p2_config,
                     replay.p1_seed, replay.p2_seed,
-                    replay.garbage_seed
+                    replay.garbage_seed,
+                    replay.mode
                 );
                 self.ui = BattleUi::new(&battle, replay.p1_name, replay.p2_name);
                 self.battle = battle;

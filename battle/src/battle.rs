@@ -8,6 +8,10 @@ use libtetris::Controller;
 pub struct Battle {
     pub player_1: Game,
     pub player_2: Game,
+    p1_piece_quota: u32,
+    p2_piece_quota: u32,
+    p1_pieces_left: u32,
+    p2_pieces_left: u32,
     p1_rng: Pcg64Mcg,
     p2_rng: Pcg64Mcg,
     garbage_rng: Pcg64Mcg,
@@ -15,25 +19,53 @@ pub struct Battle {
     pub replay: Replay
 }
 
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, Serialize, Deserialize)]
+pub enum BattleMode {
+    Realtime,
+    TurnBased(u32, u32)
+}
+
+impl Default for BattleMode {
+    fn default() -> Self {
+        BattleMode::Realtime
+    }
+}
+
 impl Battle {
     pub fn new(
         p1_config: GameConfig, p2_config: GameConfig,
         p1_seed: <Pcg64Mcg as SeedableRng>::Seed,
         p2_seed: <Pcg64Mcg as SeedableRng>::Seed,
-        garbage_seed: <Pcg64Mcg as SeedableRng>::Seed
+        garbage_seed: <Pcg64Mcg as SeedableRng>::Seed,
+        mode: BattleMode
     ) -> Self {
         let mut p1_rng = Pcg64Mcg::from_seed(p1_seed);
         let mut p2_rng = Pcg64Mcg::from_seed(p2_seed);
         let garbage_rng = Pcg64Mcg::from_seed(garbage_seed);
         let player_1 = Game::new(p1_config, &mut p1_rng);
         let player_2 = Game::new(p2_config, &mut p2_rng);
+        let (p1_piece_quota, p2_piece_quota) = match mode {
+            BattleMode::Realtime => (0, 0),
+            BattleMode::TurnBased(p1, p2) => (p1, p2)
+        };
         Battle {
             replay: Replay {
                 p1_name: String::new(), p2_name: String::new(),
                 p1_config, p2_config, p1_seed, p2_seed, garbage_seed,
-                updates: VecDeque::new()
+                updates: VecDeque::new(),
+                mode
             },
             player_1, player_2,
+            p1_piece_quota,
+            p2_piece_quota,
+            p1_pieces_left: match mode {
+                BattleMode::Realtime => u32::MAX,
+                BattleMode::TurnBased(_, _) => p1_piece_quota + 1
+            },
+            p2_pieces_left: match mode {
+                BattleMode::Realtime => u32::MAX,
+                BattleMode::TurnBased(_, _) => 1
+            },
             p1_rng, p2_rng, garbage_rng,
             time: 0,
         }
@@ -44,18 +76,46 @@ impl Battle {
 
         self.replay.updates.push_back((p1, p2));
 
-        let p1_events = self.player_1.update(p1, &mut self.p1_rng, &mut self.garbage_rng);
-        let p2_events = self.player_2.update(p2, &mut self.p2_rng, &mut self.garbage_rng);
+        let p1_active = self.p1_pieces_left > 0;
+        let p2_active = self.p2_pieces_left > 0;
+
+        let p1_events = if p1_active {
+            self.player_1.update(p1, &mut self.p1_rng, &mut self.garbage_rng)
+        } else {
+            Vec::new()
+        };
+        let p2_events = if p2_active {
+            self.player_2.update(p2, &mut self.p2_rng, &mut self.garbage_rng)
+        } else {
+            Vec::new()
+        };
 
         for event in &p1_events {
-            if let &Event::GarbageSent(amt) = event {
-                self.player_2.garbage_queue += amt;
+            match event {
+                &Event::GarbageSent(amt) => self.player_2.garbage_queue += amt,
+                Event::PieceHeld { prev, .. } => if prev.is_none() {
+                    self.p1_pieces_left += 1;
+                }
+                Event::FrameBeforePieceSpawns { .. } => self.p1_pieces_left -= 1,
+                _ => {}
             }
         }
         for event in &p2_events {
-            if let &Event::GarbageSent(amt) = event {
-                self.player_1.garbage_queue += amt;
+            match event {
+                &Event::GarbageSent(amt) => self.player_1.garbage_queue += amt,
+                Event::PieceHeld { prev, .. } => if prev.is_none() {
+                    self.p2_pieces_left += 1;
+                }
+                Event::FrameBeforePieceSpawns { .. } => self.p2_pieces_left -= 1,
+                _ => {}
             }
+        }
+
+        if p1_active && self.p1_pieces_left == 0 {
+            self.p2_pieces_left = self.p2_piece_quota;
+        }
+        if p2_active && self.p2_pieces_left == 0 {
+            self.p1_pieces_left = self.p1_piece_quota;
         }
 
         BattleUpdate {
@@ -94,5 +154,6 @@ pub struct Replay {
     pub garbage_seed: <Pcg64Mcg as SeedableRng>::Seed,
     pub p1_config: GameConfig,
     pub p2_config: GameConfig,
+    pub mode: BattleMode,
     pub updates: VecDeque<(Controller, Controller)>
 }

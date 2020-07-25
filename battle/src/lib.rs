@@ -1,7 +1,7 @@
 use serde::{ Serialize, Deserialize };
 
 mod battle;
-pub use battle::{ Battle, BattleUpdate, PlayerUpdate, Replay };
+pub use battle::{ Battle, BattleMode, BattleUpdate, PlayerUpdate, Replay };
 mod controller;
 pub use controller::PieceMoveExecutor;
 mod game;

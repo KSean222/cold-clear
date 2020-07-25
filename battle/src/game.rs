@@ -25,7 +25,10 @@ pub enum Event {
     PieceMoved,
     PieceRotated,
     PieceTSpined,
-    PieceHeld(Piece),
+    PieceHeld { 
+        held: Piece,
+        prev: Option<Piece>
+    },
     StackTouched,
     SoftDropped,
     PieceFalling(FallingPiece, FallingPiece),
@@ -198,8 +201,11 @@ impl Game {
                 // Hold
                 if !self.did_hold && self.used.hold {
                     self.did_hold = true;
-                    events.push(Event::PieceHeld(falling.piece.kind.0));
                     if let Some(piece) = self.board.hold(falling.piece.kind.0) {
+                        events.push(Event::PieceHeld {
+                            held: self.board.hold_piece.unwrap(),
+                            prev: Some(piece)
+                        });
                         // Piece in hold; the piece spawns instantly
                         if let Some(spawned) = SpawnRule::Row19Or20.spawn(piece, &self.board) {
                             *falling = FallingState {
@@ -219,6 +225,10 @@ impl Game {
                             events.push(Event::GameOver);
                         }
                     } else {
+                        events.push(Event::PieceHeld {
+                            held: self.board.hold_piece.unwrap(),
+                            prev: None
+                        });
                         // Nothing in hold; spawn next piece normally
                         self.state = GameState::SpawnDelay(self.config.spawn_delay);
                     }

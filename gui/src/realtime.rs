@@ -1,5 +1,5 @@
 use game_util::glutin::VirtualKeyCode;
-use battle::{ Battle, GameConfig };
+use battle::{ Battle, BattleMode, GameConfig };
 use libtetris::Board;
 use std::collections::{ HashSet, VecDeque };
 use rand::prelude::*;
@@ -25,6 +25,7 @@ pub struct RealtimeGame {
     state: State,
     p1_config: GameConfig,
     p2_config: GameConfig,
+    mode: BattleMode,
 }
 
 enum State {
@@ -38,10 +39,14 @@ impl RealtimeGame {
         p1: Box<InputFactory>,
         p2: Box<InputFactory>,
         p1_config: GameConfig,
-        p2_config: GameConfig
+        p2_config: GameConfig,
+        mode: BattleMode
     ) -> Self {
         let mut battle = Battle::new(
-            p1_config, p2_config, thread_rng().gen(), thread_rng().gen(), thread_rng().gen()
+            p1_config, p2_config,
+            thread_rng().gen(), thread_rng().gen(),
+            thread_rng().gen(),
+            mode
         );
         let (p1_input, p1_name) = p1(battle.player_1.board.to_compressed());
         let (p2_input, p2_name) = p2(battle.player_2.board.to_compressed());
@@ -58,7 +63,8 @@ impl RealtimeGame {
             p1_info_updates: VecDeque::new(),
             p2_info_updates: VecDeque::new(),
             state: State::Starting(180),
-            p1_config, p2_config
+            p1_config, p2_config,
+            mode
         }
     }
 }
@@ -88,7 +94,9 @@ impl crate::State for RealtimeGame {
 
                 self.battle = Battle::new(
                     self.p1_config, self.p2_config,
-                    thread_rng().gen(), thread_rng().gen(), thread_rng().gen()
+                    thread_rng().gen(), thread_rng().gen(),
+                    thread_rng().gen(),
+                    self.mode
                 );
 
                 let (p1_input, p1_name) = (self.p1_input_factory)(

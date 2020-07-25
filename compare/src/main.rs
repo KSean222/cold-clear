@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use serde::{ Serialize, Deserialize };
-use battle::{ Replay, Battle, GameConfig };
+use battle::{ Replay, Battle, BattleMode, GameConfig };
 use cold_clear::evaluation::Evaluator;
 use rand::prelude::*;
 use statrs::distribution::{ Binomial, Univariate };
@@ -64,7 +64,9 @@ fn main() {
 fn do_battle(p1: impl Evaluator + Clone, p2: impl Evaluator + Clone) -> (InfoReplay, bool) {
     let mut battle = Battle::new(
         GameConfig::default(), GameConfig::default(),
-        thread_rng().gen(), thread_rng().gen(), thread_rng().gen()
+        thread_rng().gen(), thread_rng().gen(),
+        thread_rng().gen(),
+        BattleMode::default()
     );
 
     battle.replay.p1_name = format!("Cold Clear\n{}", p1.name());

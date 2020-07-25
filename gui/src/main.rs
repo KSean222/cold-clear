@@ -5,7 +5,7 @@ use game_util::GameloopCommand;
 use game_util::glutin::*;
 use game_util::glutin::dpi::LogicalSize;
 use gilrs::{ Gilrs, Gamepad, GamepadId };
-use battle::GameConfig;
+use battle::{GameConfig, BattleMode};
 use std::collections::HashSet;
 use cold_clear::evaluation::Evaluator;
 
@@ -149,7 +149,11 @@ fn main() {
         gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
     }
 
-    let Options { p1, p2 } = read_options().unwrap_or_else(|e| {
+    let Options {
+        p1,
+        p2,
+        game_mode
+    } = read_options().unwrap_or_else(|e| {
         eprintln!("An error occured while loading options.yaml: {}", e);
         Options::default()
     });
@@ -168,7 +172,8 @@ fn main() {
             None => Box::new(RealtimeGame::new(
                 Box::new(move |board| p1.to_player(board)),
                 Box::new(move |board| p2.to_player(board)),
-                p1_game_config, p2_game_config
+                p1_game_config, p2_game_config,
+                game_mode
             ))
         },
         p1: gamepads.next().map(|(id, _)| id),
@@ -212,7 +217,8 @@ fn read_options() -> Result<Options, Box<dyn std::error::Error>> {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 struct Options {
     p1: PlayerConfig<cold_clear::evaluation::Standard>,
-    p2: PlayerConfig<cold_clear::evaluation::Standard>
+    p2: PlayerConfig<cold_clear::evaluation::Standard>,
+    game_mode: BattleMode
 }
 
 impl Default for Options {
@@ -221,7 +227,8 @@ impl Default for Options {
         p2.is_bot = true;
         Options {
             p1: PlayerConfig::default(),
-            p2
+            p2,
+            game_mode: BattleMode::default()
         }
     }
 }

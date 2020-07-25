@@ -26,7 +26,7 @@ impl PieceMoveExecutor {
     ) -> Option<FallingPiece> {
         for event in events {
             match event {
-                Event::PieceHeld(_) => {
+                Event::PieceHeld { .. } => {
                     self.needs_hold = false;
                 }
                 Event::PieceFalling(piece, _) => if self.input_timer == 0 ||

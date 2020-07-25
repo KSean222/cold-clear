@@ -1,5 +1,5 @@
 use libtetris::{ Board, ColoredRow, FallingPiece, Controller };
-use battle::{ Battle, Replay, Event, PieceMoveExecutor, GameConfig };
+use battle::{ Battle, BattleMode, Replay, Event, PieceMoveExecutor, GameConfig };
 use cold_clear::evaluation::Evaluator;
 use rand::prelude::*;
 use serde::{ Serialize, Deserialize };
@@ -88,7 +88,9 @@ pub fn do_battle(
 ) -> Option<(InfoReplay, bool)> {
     let mut battle = Battle::new(
         GameConfig::default(), GameConfig::default(),
-        thread_rng().gen(), thread_rng().gen(), thread_rng().gen()
+        thread_rng().gen(), thread_rng().gen(),
+        thread_rng().gen(),
+        BattleMode::default()
     );
 
     battle.replay.p1_name = format!("Cold Clear\n{}", p1.name());

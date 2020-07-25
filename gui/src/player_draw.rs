@@ -103,8 +103,8 @@ impl PlayerDrawState {
                         self.clear_splash = Some((locked.placement_kind.name(), 75));
                     }
                 }
-                Event::PieceHeld(piece) => {
-                    self.hold_piece = Some(*piece);
+                Event::PieceHeld { held, .. } => {
+                    self.hold_piece = Some(*held);
                     self.state = State::Delay;
                 }
                 Event::PieceSpawned { new_in_queue } => {
