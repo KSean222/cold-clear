@@ -9,32 +9,35 @@ pub mod normal;
 #[cfg(not(target_arch = "wasm32"))]
 mod pcloop;
 
-enum Mode<E: Evaluator> {
-    Normal(normal::BotState<E>),
+enum Mode<N: Evaluator, C: Evaluator> {
+    Normal(normal::BotState<N>),
+    Combo(normal::BotState<C>),
     PcLoop(pcloop::PcLooper)
 }
 
 #[cfg_attr(target_arch = "wasm32", derive(Serialize, Deserialize))]
 pub(crate) enum Task {
     NormalThink(normal::Thinker),
+    ComboThink(normal::Thinker),
     PcLoopSolve(pcloop::PcSolver)
 }
 
 #[derive(Serialize, Deserialize)]
-pub(crate) enum TaskResult<V, R> {
-    NormalThink(normal::ThinkResult<V, R>),
+pub(crate) enum TaskResult<NV, NR, CV, CR> {
+    NormalThink(normal::ThinkResult<NV, NR>),
+    ComboThink(normal::ThinkResult<CV, CR>),
     PcLoopSolve(Option<ArrayVec<[FallingPiece; 10]>>)
 }
 
-pub(crate) struct ModeSwitchedBot<'a, E: Evaluator> {
-    mode: Mode<E>,
+pub(crate) struct ModeSwitchedBot<'a, N: Evaluator, C: Evaluator> {
+    mode: Mode<N, C>,
     options: Options,
     board: Board,
     do_move: Option<u32>,
     book: Option<&'a Book>
 }
 
-impl<'a, E: Evaluator> ModeSwitchedBot<'a, E> {
+impl<'a, N: Evaluator, C: Evaluator> ModeSwitchedBot<'a, N, C> {
     pub fn new(board: Board, options: Options, book: Option<&'a Book>) -> Self {
         #[cfg(target_arch = "wasm32")]
         let mode = Mode::Normal(normal::BotState::new(board.clone(), options));
@@ -53,10 +56,14 @@ impl<'a, E: Evaluator> ModeSwitchedBot<'a, E> {
         }
     }
 
-    pub fn task_complete(&mut self, result: TaskResult<E::Value, E::Reward>) {
+    pub fn task_complete(&mut self, result: TaskResult<N::Value, N::Reward, C::Value, C::Reward>) {
         match &mut self.mode {
             Mode::Normal(bot) => match result {
                 TaskResult::NormalThink(result) => bot.finish_thinking(result),
+                _ => {}
+            }
+            Mode::Combo(bot) => match result {
+                TaskResult::ComboThink(result) => bot.finish_thinking(result),
                 _ => {}
             }
             Mode::PcLoop(bot) => match result {
@@ -74,6 +81,7 @@ impl<'a, E: Evaluator> ModeSwitchedBot<'a, E> {
                 self.board.combo = combo;
                 match &mut self.mode {
                     Mode::Normal(bot) => bot.reset(field, b2b, combo),
+                    Mode::Combo(bot) => bot.reset(field, b2b, combo),
                     Mode::PcLoop(_) => self.mode = Mode::Normal(
                         normal::BotState::new(self.board.clone(), self.options)
                     )
@@ -90,6 +98,10 @@ impl<'a, E: Evaluator> ModeSwitchedBot<'a, E> {
                                 self.mode = Mode::PcLoop(pcloop::PcLooper::new(
                                     self.board.clone(), self.options.use_hold, self.options.mode
                                 ));
+                            } else if should_combo(&self.board) {
+                                self.mode = Mode::Combo(
+                                    normal::BotState::new(self.board.clone(), self.options)
+                                );
                             } else {
                                 bot.add_next_piece(piece);
                             }
@@ -97,7 +109,16 @@ impl<'a, E: Evaluator> ModeSwitchedBot<'a, E> {
                         #[cfg(target_arch = "wasm32")] {
                             bot.add_next_piece(piece);
                         }
-                    },
+                    }
+                    Mode::Combo(bot) => {
+                        if should_stop_combo(&self.board) {
+                            self.mode = Mode::Normal(
+                                normal::BotState::new(self.board.clone(), self.options)
+                            )
+                        } else {
+                            bot.add_next_piece(piece);
+                        }
+                    }
                     Mode::PcLoop(bot) => bot.add_next_piece(piece)
                 }
             }
@@ -109,7 +130,7 @@ impl<'a, E: Evaluator> ModeSwitchedBot<'a, E> {
         }
     }
 
-    pub fn think(&mut self, eval: &E, send_move: impl FnOnce(Move, Info)) -> Vec<Task> {
+    pub fn think(&mut self, normal_eval: &N, combo_eval: &C, send_move: impl FnOnce(Move, Info)) -> Vec<Task> {
         let board = &mut self.board;
         let send_move = |mv: Move, info| {
             let next = board.advance_queue().unwrap();
@@ -124,7 +145,7 @@ impl<'a, E: Evaluator> ModeSwitchedBot<'a, E> {
         match &mut self.mode {
             Mode::Normal(bot) => {
                 if let Some(incoming) = self.do_move {
-                    if bot.next_move(eval, self.book, incoming, send_move) {
+                    if bot.next_move(normal_eval, self.book, incoming, send_move) {
                         self.do_move = None;
                         #[cfg(not(target_arch = "wasm32"))] {
                             if self.options.pcloop && can_pc_loop(board, self.options.use_hold) {
@@ -132,7 +153,13 @@ impl<'a, E: Evaluator> ModeSwitchedBot<'a, E> {
                                     board.clone(), self.options.use_hold, self.options.mode
                                 ));
                                 fn nothing(_: Move, _: Info) {}
-                                return self.think(eval, nothing);
+                                return self.think(normal_eval, combo_eval, nothing);
+                            } else if should_combo(&self.board) {
+                                self.mode = Mode::Combo(
+                                    normal::BotState::new(self.board.clone(), self.options)
+                                );
+                                fn nothing(_: Move, _: Info) {}
+                                return self.think(normal_eval, combo_eval, nothing);
                             }
                         }
                     }
@@ -146,6 +173,35 @@ impl<'a, E: Evaluator> ModeSwitchedBot<'a, E> {
                     match bot.think() {
                         Ok(thinker) => {
                             thinks.push(Task::NormalThink(thinker));
+                        }
+                        Err(false) => return thinks,
+                        Err(true) => {}
+                    }
+                }
+                thinks
+            }
+            Mode::Combo(bot) => {
+                if let Some(incoming) = self.do_move {
+                    if bot.next_move(combo_eval, self.book, incoming, send_move) {
+                        self.do_move = None;
+                        if should_stop_combo(board) {
+                            self.mode = Mode::Normal(
+                                normal::BotState::new(self.board.clone(), self.options)
+                            );
+                            fn nothing(_: Move, _: Info) {}
+                            return self.think(normal_eval, combo_eval, nothing);
+                        }
+                    }
+                }
+
+                let mut thinks = vec![];
+                for _ in 0..10 {
+                    if bot.outstanding_thinks >= self.options.threads {
+                        return thinks
+                    }
+                    match bot.think() {
+                        Ok(thinker) => {
+                            thinks.push(Task::ComboThink(thinker));
                         }
                         Err(false) => return thinks,
                         Err(true) => {}
@@ -188,9 +244,10 @@ impl<'a, E: Evaluator> ModeSwitchedBot<'a, E> {
 }
 
 impl Task {
-    pub fn execute<E: Evaluator>(self, eval: &E) -> TaskResult<E::Value, E::Reward> {
+    pub fn execute<N: Evaluator, C: Evaluator>(self, normal_eval: &N, combo_eval: &C) -> TaskResult<N::Value, N::Reward, C::Value, C::Reward> {
         match self {
-            Task::NormalThink(thinker) => TaskResult::NormalThink(thinker.think(eval)),
+            Task::NormalThink(thinker) => TaskResult::NormalThink(thinker.think(normal_eval)),
+            Task::ComboThink(thinker) => TaskResult::ComboThink(thinker.think(combo_eval)),
             Task::PcLoopSolve(solver) => TaskResult::PcLoopSolve(solver.solve())
         }
     }
@@ -207,6 +264,14 @@ fn can_pc_loop(board: &Board, hold_enabled: bool) -> bool {
     } else {
         pieces >= 10
     }
+}
+
+fn should_combo(board: &Board) -> bool {
+    crate::evaluation::standard::c4w_rows(board) > 10
+}
+
+fn should_stop_combo(board: &Board) -> bool {
+    crate::evaluation::standard::c4w_rows(board) < 5 && board.combo == 0
 }
 
 #[cfg(target_arch = "wasm32")]

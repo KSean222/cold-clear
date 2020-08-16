@@ -1,7 +1,7 @@
 use libtetris::{ LockResult, Board, Piece };
 use crate::dag::MoveCandidate;
 
-mod standard;
+pub mod standard;
 pub use self::standard::Standard;
 pub mod changed;
 

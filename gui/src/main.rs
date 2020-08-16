@@ -246,10 +246,17 @@ impl<E: Evaluator + Default + Clone + 'static> PlayerConfig<E> {
                     &format!("\n{:.1}%", 100.0 / (self.bot_config.speed_limit + 1) as f32)
                 );
             }
+            let mut combo_evaluator = cold_clear::evaluation::Standard::default();
+            combo_evaluator.combo_garbage = 999;
+            combo_evaluator.clear1 = 250;
+            combo_evaluator.clear2 = -500;
+            combo_evaluator.clear3 = -500;
+            combo_evaluator.clear4 = 100;
             (Box::new(BotInput::new(cold_clear::Interface::launch(
                 board,
                 self.bot_config.options,
                 self.bot_config.weights.clone(),
+                combo_evaluator,
                 self.bot_config.book_path.as_ref().and_then(|path| {
                     let mut book_cache = self.bot_config.book_cache.borrow_mut();
                     match &*book_cache {

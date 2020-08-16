@@ -2,6 +2,22 @@ use libtetris::*;
 use serde::{ Serialize, Deserialize };
 use super::*;
 
+pub fn c4w_rows(board: &Board) -> u32 {
+    let mut c4w_row = *u16::SOLID;
+    for x in 3..7 {
+        c4w_row.set(x, CellColor::Empty);
+    }
+    let mut c4w_rows = 0;
+    for y in 0..40 {
+        if *board.get_row(y) == c4w_row {
+            c4w_rows += 1;
+        } else if c4w_rows > 0 {
+            break;
+        }
+    }
+    c4w_rows
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Standard {
@@ -315,6 +331,9 @@ impl Evaluator for Standard {
             transient_eval += self.covered_cells * covered_cells;
             transient_eval += self.covered_cells_sq * covered_cells_sq;
         }
+
+        let c4w_rows = c4w_rows(&board);
+        transient_eval += (c4w_rows * c4w_rows * 80) as i32;
 
         (Value {
             value: transient_eval,
