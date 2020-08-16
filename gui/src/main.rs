@@ -229,18 +229,18 @@ impl Default for Options {
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[serde(default)]
-struct PlayerConfig<E: Default> {
+struct PlayerConfig<E: cold_clear::evaluation::ComboableEvaluator + Default> {
     controls: input::UserInput,
     game: GameConfig,
     bot_config: BotConfig<E>,
     is_bot: bool,
 }
 
-impl<E: Evaluator + Default + Clone + 'static> PlayerConfig<E> {
+impl<E: cold_clear::evaluation::ComboableEvaluator + Default + Clone + 'static> PlayerConfig<E> {
     pub fn to_player(&self, board: libtetris::Board) -> (Box<dyn input::InputSource>, String) {
         use crate::input::BotInput;
         if self.is_bot {
-            let mut name = format!("Cold Clear\n{}", self.bot_config.weights.name());
+            let mut name = format!("Cold Clear\n{}", self.bot_config.normal_weights.name());
             if self.bot_config.speed_limit != 0 {
                 name.push_str(
                     &format!("\n{:.1}%", 100.0 / (self.bot_config.speed_limit + 1) as f32)
@@ -255,7 +255,7 @@ impl<E: Evaluator + Default + Clone + 'static> PlayerConfig<E> {
             (Box::new(BotInput::new(cold_clear::Interface::launch(
                 board,
                 self.bot_config.options,
-                self.bot_config.weights.clone(),
+                self.bot_config.normal_weights.clone(),
                 combo_evaluator,
                 self.bot_config.book_path.as_ref().and_then(|path| {
                     let mut book_cache = self.bot_config.book_cache.borrow_mut();
@@ -276,13 +276,27 @@ impl<E: Evaluator + Default + Clone + 'static> PlayerConfig<E> {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
-struct BotConfig<E> {
-    weights: E,
+struct BotConfig<E: cold_clear::evaluation::ComboableEvaluator> {
+    normal_weights: E,
+    combo_weights: E,
     options: cold_clear::Options,
     speed_limit: u32,
     book_path: Option<String>,
     #[serde(skip)]
     book_cache: std::cell::RefCell<Option<std::sync::Arc<Book>>>
+}
+
+impl<E: cold_clear::evaluation::ComboableEvaluator + Default> Default for BotConfig<E> {
+    fn default() -> Self {
+        Self {
+            normal_weights: Default::default(),
+            combo_weights: E::combo_config(),
+            options: Default::default(),
+            speed_limit: Default::default(),
+            book_path: Default::default(),
+            book_cache: Default::default()
+        }
+    }
 }

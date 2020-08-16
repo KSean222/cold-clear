@@ -138,6 +138,27 @@ impl Standard {
             sub_name: None
         }
     }
+
+    /// `combo_config` for `fast_config`.
+    pub fn fast_combo_config() -> Self {
+        Self::make_combo_config(Self::fast_config())
+    }
+
+    fn make_combo_config(mut config: Self) -> Self {
+        config.combo_garbage = 999;
+        config.clear1 = 250;
+        config.clear2 = -500;
+        config.clear3 = -500;
+        config.clear4 = 100;
+        config
+    }
+}
+
+impl ComboableEvaluator for Standard {
+    /// Used for C4W comboing.
+    fn combo_config() -> Self {
+        Self::make_combo_config(Self::default())
+    }
 }
 
 impl Evaluator for Standard {

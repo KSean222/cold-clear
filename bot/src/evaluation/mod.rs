@@ -54,3 +54,7 @@ impl<T: Evaluator> Evaluator for std::sync::Arc<T> {
         (**self).pick_move(candidates, incoming)
     }
 }
+
+pub trait ComboableEvaluator: Evaluator {
+    fn combo_config() -> Self;
+}
