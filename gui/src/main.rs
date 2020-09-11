@@ -16,6 +16,7 @@ mod res;
 mod realtime;
 mod replay;
 mod input;
+mod minobot_input;
 
 use realtime::RealtimeGame;
 use replay::ReplayGame;
@@ -219,11 +220,24 @@ struct Options {
 impl Default for Options {
     fn default() -> Self {
         let mut p2 = PlayerConfig::default();
-        p2.is_bot = true;
+        p2.player_type = PlayerType::ColdClear;
         Options {
             p1: PlayerConfig::default(),
             p2
         }
+    }
+}
+
+#[derive(Serialize, Deserialize, Copy, Clone, Debug, PartialEq, Eq)]
+enum PlayerType {
+    Human,
+    ColdClear,
+    MinoBot
+}
+
+impl Default for PlayerType {
+    fn default() -> Self {
+        PlayerType::Human
     }
 }
 
@@ -232,37 +246,56 @@ impl Default for Options {
 struct PlayerConfig<E: Default> {
     controls: input::UserInput,
     game: GameConfig,
-    bot_config: BotConfig<E>,
-    is_bot: bool,
+    cc_config: ColdClearConfig<E>,
+    mb_config: MinoBotConfig,
+    bot_speed_limit: u32,
+    player_type: PlayerType,
 }
 
 impl<E: Evaluator + Default + Clone + 'static> PlayerConfig<E> {
     pub fn to_player(&self, board: libtetris::Board) -> (Box<dyn input::InputSource>, String) {
-        use crate::input::BotInput;
-        if self.is_bot {
-            let mut name = format!("Cold Clear\n{}", self.bot_config.weights.name());
-            if self.bot_config.speed_limit != 0 {
+        if self.player_type != PlayerType::Human {
+            let mut name = if self.player_type == PlayerType::ColdClear {
+                "Cold Clear"
+            } else {
+                "MinoBot"
+            }.to_owned();
+            name.push('\n');
+            name.push_str(&self.cc_config.weights.name());
+            if self.bot_speed_limit != 0 {
                 name.push_str(
-                    &format!("\n{:.1}%", 100.0 / (self.bot_config.speed_limit + 1) as f32)
+                    &format!("\n{:.1}%", 100.0 / (self.bot_speed_limit + 1) as f32)
                 );
             }
-            (Box::new(BotInput::new(cold_clear::Interface::launch(
-                board,
-                self.bot_config.options,
-                self.bot_config.weights.clone(),
-                self.bot_config.book_path.as_ref().and_then(|path| {
-                    let mut book_cache = self.bot_config.book_cache.borrow_mut();
-                    match &*book_cache {
-                        Some(b) => Some(b.clone()),
-                        None => {
-                            let book = Book::load_from(std::fs::File::open(path).ok()?).ok()?;
-                            let book = std::sync::Arc::new(book);
-                            *book_cache = Some(book.clone());
-                            Some(book)
+            (if self.player_type == PlayerType::ColdClear {
+                Box::new(crate::input::BotInput::new(cold_clear::Interface::launch(
+                    board,
+                    self.cc_config.options,
+                    self.cc_config.weights.clone(),
+                    self.cc_config.book_path.as_ref().and_then(|path| {
+                        let mut book_cache = self.cc_config.book_cache.borrow_mut();
+                        match &*book_cache {
+                            Some(b) => Some(b.clone()),
+                            None => {
+                                let book = Book::load_from(std::fs::File::open(path).ok()?).ok()?;
+                                let book = std::sync::Arc::new(book);
+                                *book_cache = Some(book.clone());
+                                Some(book)
+                            }
                         }
-                    }
-                })
-            ), self.bot_config.speed_limit)), name)
+                    })
+                ), self.bot_speed_limit))
+            } else {
+                let interface = minobot::BotHandle::new(
+                    minotetris::Board::new(),
+                    self.mb_config.weights.clone(),
+                    self.mb_config.settings.clone()
+                );
+                for piece in board.next_queue() {
+                    interface.add_piece(minobot_input::cc_piece_to_mb(piece));
+                }
+                Box::new(minobot_input::MinoBotInput::new(interface, self.bot_speed_limit))
+            }, name)
         } else {
             (Box::new(self.controls), "Human".to_owned())
         }
@@ -271,11 +304,17 @@ impl<E: Evaluator + Default + Clone + 'static> PlayerConfig<E> {
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[serde(default)]
-struct BotConfig<E> {
+struct ColdClearConfig<E> {
     weights: E,
     options: cold_clear::Options,
-    speed_limit: u32,
     book_path: Option<String>,
     #[serde(skip)]
     book_cache: std::cell::RefCell<Option<std::sync::Arc<Book>>>
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(default)]
+struct MinoBotConfig {
+    weights: minobot::evaluator::StandardEvaluator,
+    settings: minobot::bot::BotSettings,
 }
