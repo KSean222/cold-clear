@@ -17,6 +17,7 @@ mod realtime;
 mod replay;
 mod input;
 mod minobot_input;
+mod misamino_input;
 
 use realtime::RealtimeGame;
 use replay::ReplayGame;
@@ -232,7 +233,8 @@ impl Default for Options {
 enum PlayerType {
     Human,
     ColdClear,
-    MinoBot
+    MinoBot,
+    MisaMino
 }
 
 impl Default for PlayerType {
@@ -254,38 +256,37 @@ struct PlayerConfig<E: Default> {
 
 impl<E: Evaluator + Default + Clone + 'static> PlayerConfig<E> {
     pub fn to_player(&self, board: libtetris::Board) -> (Box<dyn input::InputSource>, String) {
-        if self.player_type != PlayerType::Human {
-            let mut name = if self.player_type == PlayerType::ColdClear {
-                "Cold Clear"
-            } else {
-                "MinoBot"
-            }.to_owned();
-            name.push('\n');
-            name.push_str(&self.cc_config.weights.name());
-            if self.bot_speed_limit != 0 {
-                name.push_str(
-                    &format!("\n{:.1}%", 100.0 / (self.bot_speed_limit + 1) as f32)
-                );
-            }
-            (if self.player_type == PlayerType::ColdClear {
-                Box::new(crate::input::BotInput::new(cold_clear::Interface::launch(
-                    board,
-                    self.cc_config.options,
-                    self.cc_config.weights.clone(),
-                    self.cc_config.book_path.as_ref().and_then(|path| {
-                        let mut book_cache = self.cc_config.book_cache.borrow_mut();
-                        match &*book_cache {
-                            Some(b) => Some(b.clone()),
-                            None => {
-                                let book = Book::load_from(std::fs::File::open(path).ok()?).ok()?;
-                                let book = std::sync::Arc::new(book);
-                                *book_cache = Some(book.clone());
-                                Some(book)
-                            }
+        let mut name = match self.player_type {
+            PlayerType::Human => "Human",
+            PlayerType::ColdClear => "Cold Clear",
+            PlayerType::MinoBot => "MinoBot",
+            PlayerType::MisaMino => "MisaMino"
+        }.to_owned();
+        if self.player_type != PlayerType::Human && self.bot_speed_limit != 0 {
+            name.push_str(
+                &format!("\n{:.1}%", 100.0 / (self.bot_speed_limit + 1) as f32)
+            );
+        }
+        (match self.player_type {
+            PlayerType::Human => Box::new(self.controls),
+            PlayerType::ColdClear => Box::new(crate::input::BotInput::new(cold_clear::Interface::launch(
+                board,
+                self.cc_config.options,
+                self.cc_config.weights.clone(),
+                self.cc_config.book_path.as_ref().and_then(|path| {
+                    let mut book_cache = self.cc_config.book_cache.borrow_mut();
+                    match &*book_cache {
+                        Some(b) => Some(b.clone()),
+                        None => {
+                            let book = Book::load_from(std::fs::File::open(path).ok()?).ok()?;
+                            let book = std::sync::Arc::new(book);
+                            *book_cache = Some(book.clone());
+                            Some(book)
                         }
-                    })
-                ), self.bot_speed_limit))
-            } else {
+                    }
+                })
+            ), self.bot_speed_limit)),
+            PlayerType::MinoBot => {
                 let interface = minobot::BotHandle::new(
                     minotetris::Board::new(),
                     self.mb_config.weights.clone(),
@@ -295,10 +296,9 @@ impl<E: Evaluator + Default + Clone + 'static> PlayerConfig<E> {
                     interface.add_piece(minobot_input::cc_piece_to_mb(piece));
                 }
                 Box::new(minobot_input::MinoBotInput::new(interface, self.bot_speed_limit))
-            }, name)
-        } else {
-            (Box::new(self.controls), "Human".to_owned())
-        }
+            }
+            PlayerType::MisaMino => Box::new(misamino_input::MisaMinoInput::new(self.bot_speed_limit))
+        }, name)
     }
 }
 
