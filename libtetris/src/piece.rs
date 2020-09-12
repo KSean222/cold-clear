@@ -366,7 +366,7 @@ pub enum PieceMovement {
 }
 
 impl PieceMovement {
-    pub fn apply(self, piece: &mut FallingPiece, board: &Board) -> bool {
+    pub fn apply(self, piece: &mut FallingPiece, board: &Board<impl Row>) -> bool {
         match self {
             PieceMovement::Left => piece.shift(board, -1, 0),
             PieceMovement::Right => piece.shift(board, 1, 0),

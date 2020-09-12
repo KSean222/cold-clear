@@ -101,42 +101,37 @@ impl InputSource for MisaMinoInput {
                     let mut hold = false;
                     let mut inputs = VecDeque::new();
                     if let Ok(result) = result {
-                        for instruction in result.Instructions {
-                            match instruction {
-                                1 => inputs.push_back(PieceMovement::Left),
-                                2 => inputs.push_back(PieceMovement::Right),
-                                3 | 4 => {
-                                    //TODO make this configurable
-                                    let piece = if hold {
-                                        args.Hold.unwrap_or(*args.Queue.first().unwrap())
-                                    } else {
-                                        args.Current
-                                    };
-                                    if let Some(mut piece) = SpawnRule::Row19Or20.spawn(piece, board) {
-                                        for &input in &inputs {
-                                            match input {
-                                                PieceMovement::Left => piece.shift(board, -1, 0),
-                                                PieceMovement::Right => piece.shift(board, 1, 0),
-                                                PieceMovement::Cw => piece.cw(board),
-                                                PieceMovement::Ccw => piece.ccw(board),
-                                                PieceMovement::SonicDrop => piece.sonic_drop(board)
-                                            };
+                        if let Some(mut piece) = SpawnRule::Row19Or20.spawn(args.Current, board) {
+                            for instruction in result.Instructions {
+                                let instruction = match instruction {
+                                    1 => Some((PieceMovement::Left, false)),
+                                    2 => Some((PieceMovement::Right, false)),
+                                    3 => Some((PieceMovement::Left, true)),
+                                    4 => Some((PieceMovement::Right, true)),
+                                    //Technically 5 is the "soft drop one down" instruction but that's tricky to support
+                                    5 | 6 => Some((PieceMovement::SonicDrop, false)),
+                                    7 => Some((PieceMovement::Ccw, false)),
+                                    8 => Some((PieceMovement::Cw, false)),
+                                    10 => {
+                                        hold = true;
+                                        let new_piece = args.Hold.unwrap_or(*args.Queue.first().unwrap());
+                                        if let Some(new_piece) = SpawnRule::Row19Or20.spawn(new_piece, board) {
+                                            piece = new_piece;
+                                        } else {
+                                            break;
                                         }
-                                        while piece.shift(board, if instruction == 3 { -1 } else { 1 }, 0) {
-                                            inputs.push_back(if instruction == 3 {
-                                                PieceMovement::Left
-                                            } else {
-                                                PieceMovement::Right
-                                            });
+                                        None
+                                    }
+                                    _ => None
+                                };
+                                if let Some((movement, repeated)) = instruction {
+                                    while movement.apply(&mut piece, board) {
+                                        inputs.push_back(movement);
+                                        if !repeated {
+                                            break;
                                         }
                                     }
                                 }
-                                //Technically 5 is the "soft drop one down" instruction but that's tricky to support
-                                5 | 6 => inputs.push_back(PieceMovement::SonicDrop),
-                                7 => inputs.push_back(PieceMovement::Ccw),
-                                8 => inputs.push_back(PieceMovement::Cw),
-                                10 => hold = true,
-                                _ => {}
                             }
                         }
                     }
