@@ -19,7 +19,7 @@ pub fn cc_piece_to_mb(piece: Piece) -> minotetris::PieceType {
 
 pub fn cc_board_to_mb(board: &Board<impl Row>) -> minotetris::Board {
     let mut rows = [0u16; 40];
-    for (src, dest) in board.get_field().iter().rev().zip(rows.iter_mut()) {
+    for (src, dest) in board.get_field().iter().zip(rows.iter_mut()) {
         for (x, &cell) in src.iter().enumerate() {
             let cell = if cell {
                 minotetris::CellType::Garbage
@@ -31,9 +31,9 @@ pub fn cc_board_to_mb(board: &Board<impl Row>) -> minotetris::Board {
     }
     let mut minotetris_board = minotetris::Board::new();
     minotetris_board.set_field(rows);
-    if let Some(piece) = board.hold_piece {
-        minotetris_board.hold = Some(cc_piece_to_mb(piece));
-    }
+    minotetris_board.hold = board.hold_piece.map(cc_piece_to_mb);
+    minotetris_board.combo = board.combo;
+    minotetris_board.b2b = board.b2b_bonus;
     minotetris_board
 }
 
@@ -96,7 +96,7 @@ impl InputSource for MinoBotInput {
                         _ => unreachable!()
                     }),
                     x: mv.mv.x,
-                    y: 39 - mv.mv.y,
+                    y: mv.mv.y,
                     tspin: match mv.mv.tspin {
                         minotetris::TspinType::None => TspinStatus::None,
                         minotetris::TspinType::Mini => TspinStatus::Mini,
