@@ -51,8 +51,12 @@ impl MisaMinoInput {
         std::thread::spawn(move || {
             let mut line = String::new();
             while stdout.read_line(&mut line).is_ok() {
-                tx.send(serde_json::from_str(&line).unwrap()).unwrap();
-                line.clear();
+                if let Ok(result) = serde_json::from_str(&line) {
+                    tx.send(result).unwrap();
+                    line.clear();
+                } else {
+                    break;
+                }
             }
         });
         MisaMinoInput {
