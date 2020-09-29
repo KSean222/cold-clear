@@ -20,8 +20,8 @@ serde_yaml = "0.8.11"
 serde_json = "1.0"
 bincode = "1.2"
 libflate = "0.1"
-minobot = { git = "https://github.com/KSean222/minobot-rust", rev = "31b8407" }
-minotetris = { git = "https://github.com/KSean222/minobot-rust", rev = "31b8407" }
+minobot = { git = "https://github.com/KSean222/minobot-rust", rev = "29ea7ea" }
+minotetris = { git = "https://github.com/KSean222/minobot-rust", rev = "29ea7ea" }
 
 [build-dependencies]
 build-utils = { git = "https://github.com/MinusKelvin/game-util-rs", rev = "558fd05" }

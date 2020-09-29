@@ -70,8 +70,7 @@ impl InputSource for MinoBotInput {
                     self.interface.add_piece(cc_piece_to_mb(*new_in_queue));
                 }
                 Event::GarbageAdded(_) => {
-                    let queue = board.next_queue().map(cc_piece_to_mb).collect();
-                    self.interface.reset(cc_board_to_mb(board), queue);
+                    self.interface.reset(cc_board_to_mb(board));
                 }
                 _ => {}
             }
@@ -119,8 +118,7 @@ impl InputSource for MinoBotInput {
         if let Some((expected, ref mut executor)) = self.executing {
             if let Some(loc) = executor.update(&mut self.controller, board, events) {
                 if loc != expected {
-                    let queue = board.next_queue().map(cc_piece_to_mb).collect();
-                    self.interface.reset(cc_board_to_mb(board), queue);
+                    self.interface.reset(cc_board_to_mb(board));
                 }
                 self.executing = None;
             }
