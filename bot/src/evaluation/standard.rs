@@ -8,6 +8,7 @@ pub struct Standard {
     pub back_to_back: i32,
     pub bumpiness: i32,
     pub bumpiness_sq: i32,
+    pub row_transitions: i32,
     pub height: i32,
     pub top_half: i32,
     pub top_quarter: i32,
@@ -39,6 +40,8 @@ pub struct Standard {
     pub wasted_t: i32,
 
     pub use_bag: bool,
+    pub timed_jeopardy: bool,
+    pub stack_pc_damage: bool,
     pub sub_name: Option<String>
 }
 
@@ -48,6 +51,7 @@ impl Default for Standard {
             back_to_back: 52,
             bumpiness: -24,
             bumpiness_sq: -7,
+            row_transitions: -5,
             height: -39,
             top_half: -150,
             top_quarter: -511,
@@ -79,6 +83,8 @@ impl Default for Standard {
             combo_garbage: 150,
 
             use_bag: true,
+            timed_jeopardy: true,
+            stack_pc_damage: false,
             sub_name: None
         }
     }
@@ -90,6 +96,7 @@ impl Standard {
             back_to_back: 10,
             bumpiness: -7,
             bumpiness_sq: -28,
+            row_transitions: -5,
             height: -46,
             top_half: -126,
             top_quarter: -493,
@@ -119,6 +126,8 @@ impl Standard {
             move_time: -1,
             wasted_t: -147,
             use_bag: true,
+            timed_jeopardy: false,
+            stack_pc_damage: false,
             sub_name: None
         }
     }
@@ -142,8 +151,9 @@ impl Evaluator for Standard {
     ) -> MoveCandidate<Value> {
         let mut backup = None;
         for mv in candidates.into_iter() {
-            if mv.board.column_heights()[3..6].iter()
-                    .all(|h| incoming as i32 - mv.lock.garbage_sent as i32 + h <= 20) {
+            if incoming == 0 || mv.board.column_heights()[3..6].iter().all(
+                |h| incoming as i32 - mv.lock.garbage_sent as i32 + h <= 20
+            ) {
                 return mv
             }
 
@@ -165,7 +175,8 @@ impl Evaluator for Standard {
 
         if lock.perfect_clear {
             acc_eval += self.perfect_clear;
-        } else {
+        }
+        if self.stack_pc_damage || !lock.perfect_clear {
             if lock.b2b {
                 acc_eval += self.b2b_clear;
             }
@@ -228,7 +239,10 @@ impl Evaluator for Standard {
         transient_eval += self.top_quarter * (highest_point - 15).max(0);
         transient_eval += self.top_half * (highest_point - 10).max(0);
 
-        acc_eval += (self.jeopardy * (highest_point - 10).max(0) * move_time) / 10;
+        acc_eval += self.jeopardy
+            * (highest_point - 10).max(0)
+            * if self.timed_jeopardy { move_time } else { 10 }
+            / 10;
 
         let ts = if self.use_bag {
             board.next_bag().contains(Piece::T) as usize
@@ -240,29 +254,27 @@ impl Evaluator for Standard {
 
         let mut board = board.clone();
         for _ in 0..ts {
-            let result = if let Some((x, y)) = sky_tslot(&board) {
-                cutout_tslot(board.clone(), FallingPiece {
-                    x, y,
-                    kind: PieceState(Piece::T, RotationState::South),
-                    tspin: TspinStatus::Full
-                })
-            } else if let Some(twist) = tst_twist(&board) {
-                let piece = twist.piece();
-                if let Some((x, y)) = cave_tslot(&board, piece) {
-                    cutout_tslot(board.clone(), FallingPiece {
-                        x, y,
-                        kind: PieceState(Piece::T, RotationState::South),
-                        tspin: TspinStatus::Full
+            let cutout_location = sky_tslot_left(&board)
+                .or_else(|| sky_tslot_right(&board))
+                .or_else(|| {
+                    let tst = tst_twist_left(&board).or_else(|| tst_twist_right(&board))?;
+                    cave_tslot(&board, tst).or_else(|| {
+                        let corners = board.occupied(tst.x-1, tst.y-1) as usize
+                            + board.occupied(tst.x+1, tst.y-1) as usize
+                            + board.occupied(tst.x-1, tst.y+1) as usize
+                            + board.occupied(tst.x+1, tst.y+1) as usize;
+                        if corners >= 3 && board.on_stack(&tst) {
+                            Some(tst)
+                        } else {
+                            None
+                        }
                     })
-                } else if twist.is_tslot {
-                    cutout_tslot(board.clone(), piece)
-                } else {
-                    break
-                }
-            } else if let Some(twist) = fin_to_win(&board) {
-                cutout_tslot(board.clone(), twist.piece())
-            } else {
-                break
+                })
+                .or_else(|| fin_left(&board))
+                .or_else(|| fin_right(&board));
+            let result = match cutout_location {
+                Some(location) => cutout_tslot(board.clone(), location),
+                None => break
             };
             transient_eval += self.tslot[result.lines];
             if let Some(b) = result.result {
@@ -295,6 +307,14 @@ impl Evaluator for Standard {
         transient_eval += self.well_depth * depth;
         if depth != 0 {
             transient_eval += self.well_column[well];
+        }
+
+        if self.row_transitions != 0 {
+            transient_eval += self.row_transitions * (0..40)
+                .map(|y| *board.get_row(y))
+                .map(|r| (r | 0b1_00000_00000) ^ (1 | r << 1))
+                .map(|d| d.count_ones() as i32)
+                .sum::<i32>();
         }
 
         if self.bumpiness | self.bumpiness_sq != 0 {
@@ -407,85 +427,129 @@ fn covered_cells(board: &Board) -> (i32, i32) {
     (covered, covered_sq)
 }
 
-/// Determines the existence and location of a reachable T slot on the board.
-/// 
-/// That is, it looks for these with sky above:
-/// 
-/// ```
-/// []....    ....[]
-/// ......    ......
-/// []..[]    []..[]
-/// ```
-/// 
-/// If there is more than one, this returns the one with the most lines filled.
-fn sky_tslot(board: &Board) -> Option<(i32, i32)> {
-    fn filledness(board: &Board, x: i32, y: i32) -> usize {
-        let mut filled = 0;
-        'yloop: for cy in y-1..y+1 {
-            for rx in 0..10 {
-                if rx < x-1 || rx > x+1 {
-                    if !board.occupied(rx, cy) {
-                        continue 'yloop;
-                    }
-                }
-            }
-            filled += 1;
-        }
-        filled
-    }
-
-    let mut best = None;
-    for (x, hs) in board.column_heights().windows(2).enumerate() {
-        let x = x as i32;
-        let (left_h, right_h) = (hs[0], hs[1]);
-        if left_h > right_h {
-            // Look for topleft-open T slot
-            // leftmost column is known to match, as is middle column; no need to check
-            let is_tslot =
-                board.occupied(x+2, left_h+1) &&
-                !board.occupied(x+2, left_h) &&
-                board.occupied(x+2, left_h-1);
-            if is_tslot {
-                best = match best {
-                    None => Some((filledness(board, x+1, left_h), x+1, left_h)),
-                    Some((f, ox, oy)) => {
-                        let fill = filledness(board, x+1, left_h);
-                        if fill > f {
-                            Some((fill, x+1, left_h))
-                        } else {
-                            Some((f, ox, oy))
+macro_rules! detect_shape {
+    (
+        $name:ident
+        heights [$($heights:pat)*]
+        require (|$b:pat, $xarg:pat| $req:expr)
+        start_y ($starty:expr)
+        success ($x:expr, $y:expr, $piece:ident, $facing:ident)
+        $([$($rowspec:tt)*])*
+    ) => {
+        fn $name(board: &Board) -> Option<FallingPiece> {
+            for (x, s) in board.column_heights().windows(
+                detect_shape!(@len [$($heights)*])
+            ).enumerate() {
+                let x = x as i32;
+                if let [$($heights),*] = *s {
+                    if !(|$b: &Board, $xarg: i32| $req)(board, x) { continue }
+                    let y = $starty;
+                    $(
+                        {
+                            $(
+                                if !detect_shape!(@rowspec $rowspec board x y) {
+                                    continue
+                                }
+                                #[allow(unused)]
+                                let x = x + 1;
+                            )*
                         }
-                    }
+                        #[allow(unused)]
+                        let y = y-1;
+                    )*
+                    return Some(FallingPiece {
+                        kind: PieceState(Piece::$piece, RotationState::$facing),
+                        x: x + $x,
+                        y: $y,
+                        tspin: TspinStatus::None
+                    })
                 }
             }
-        } else if right_h > left_h {
-            // Look for topright-open T slot
-            // rightmost column is known to match, as is middle column; no need to check
-            let is_tslot =
-                board.occupied(x-1, right_h+1) &&
-                !board.occupied(x-1, right_h) &&
-                board.occupied(x-1, right_h-1);
-            if is_tslot {
-                best = match best {
-                    None => Some((filledness(board, x, right_h), x, right_h)),
-                    Some((f, ox, oy)) => {
-                        let fill = filledness(board, x, right_h);
-                        if fill > f {
-                            Some((fill, x, right_h))
-                        } else {
-                            Some((f, ox, oy))
-                        }
-                    }
-                }
-            }
-        } else {
-            continue
+            None
         }
-    }
-    best.map(|(_,x,y)| (x,y))
+    };
+    (@rowspec ? $board:ident $x:ident $y:ident) => { true };
+    (@rowspec # $board:ident $x:ident $y:ident) => { $board.occupied($x, $y) };
+    (@rowspec _ $board:ident $x:ident $y:ident) => { !$board.occupied($x, $y) };
+    (@len []) => { 0 };
+    (@len [$_:tt $($rest:tt)*]) => { 1 + detect_shape!(@len [$($rest)*]) }
 }
 
-fn cave_tslot(board: &Board, mut starting_point: FallingPiece) -> Option<(i32, i32)> {
+detect_shape! {
+    sky_tslot_right
+    heights [_ h1 h2]
+    require (|_, _| h1 <= h2-1)
+    start_y(h2+1)
+    success(1, h2, T, South)
+    [# ? ?]
+    [_ ? ?]
+    [# ? ?]
+}
+
+detect_shape! {
+    sky_tslot_left
+    heights [h1 h2 _]
+    require(|_, _| h2 <= h1-1)
+    start_y(h1+1)
+    success(1, h1, T, South)
+    [? ? #]
+    [? ? _]
+    [? ? #]
+}
+
+detect_shape! {
+    tst_twist_left
+    heights [h1 h2 _]
+    require (|board, x| h1 <= h2 && board.occupied(x-1, h2) == board.occupied(x-1, h2+1))
+    start_y (h2 + 1)
+    success (2, h2-2, T, West)
+    [? ? #]
+    [? ? _]
+    [? ? _]
+    [? _ _]
+    [? ? _]
+}
+
+detect_shape! {
+    tst_twist_right
+    heights [_ h1 h2]
+    require (|board, x| h2 <= h1 && board.occupied(x+3, h1) == board.occupied(x+3, h1+1))
+    start_y (h1 + 1)
+    success (0, h1-2, T, East)
+    [# ? ?]
+    [_ ? ?]
+    [_ ? ?]
+    [_ _ ?]
+    [_ ? ?]
+}
+
+detect_shape! {
+    fin_left
+    heights [h1 h2 _ _]
+    require (|_, _| h1 <= h2+1)
+    start_y(h2 + 2)
+    success (3, h2-1, T, West)
+    [? ? # # ?]
+    [? ? _ _ ?]
+    [? ? _ _ #]
+    [? ? _ _ ?]
+    [? ? # _ #]
+}
+
+detect_shape! {
+    fin_right
+    heights [_ _ h1 h2]
+    require (|board, x| h2 <= h1+1 && board.occupied(x-1, h1) && board.occupied(x-1, h1-2))
+    start_y (h1 + 2)
+    success (0, h1-1, T, East)
+    [# # ? ?]
+    [_ _ ? ?]
+    [_ _ ? ?]
+    [_ _ ? ?]
+    [_ # ? ?]
+}
+
+fn cave_tslot(board: &Board, mut starting_point: FallingPiece) -> Option<FallingPiece> {
     starting_point.sonic_drop(board);
     let x = starting_point.x;
     let y = starting_point.y;
@@ -501,7 +565,11 @@ fn cave_tslot(board: &Board, mut starting_point: FallingPiece) -> Option<(i32, i
                 board.occupied(x+1, y-1) &&
                 board.occupied(x-1, y+1)
             {
-                Some((x, y))
+                Some(FallingPiece {
+                    x, y,
+                    kind: PieceState(Piece::T, RotationState::South),
+                    tspin: TspinStatus::None
+                })
             } else if !board.occupied(x+1, y-1) &&
                 !board.occupied(x+2, y-1) &&
                 !board.occupied(x+1, y-2) &&
@@ -510,7 +578,11 @@ fn cave_tslot(board: &Board, mut starting_point: FallingPiece) -> Option<(i32, i
                 board.occupied(x, y-2) &&
                 board.occupied(x+2, y-2)
             {
-                Some((x+1, y-1))
+                Some(FallingPiece {
+                    x: x+1, y: y-1,
+                    kind: PieceState(Piece::T, RotationState::South),
+                    tspin: TspinStatus::None
+                })
             } else {
                 None
             }
@@ -526,7 +598,11 @@ fn cave_tslot(board: &Board, mut starting_point: FallingPiece) -> Option<(i32, i
                 board.occupied(x+1, y-1) &&
                 board.occupied(x-1, y-1)
             {
-                Some((x, y))
+                Some(FallingPiece {
+                    x, y,
+                    kind: PieceState(Piece::T, RotationState::South),
+                    tspin: TspinStatus::None
+                })
             } else if !board.occupied(x-1, y-1) &&
                 !board.occupied(x-2, y-1) &&
                 !board.occupied(x-1, y-2) &&
@@ -535,7 +611,11 @@ fn cave_tslot(board: &Board, mut starting_point: FallingPiece) -> Option<(i32, i
                 board.occupied(x-2, y-2) &&
                 board.occupied(x, y-2)
             {
-                Some((x-1, y-1))
+                Some(FallingPiece {
+                    x: x-1, y: y-1,
+                    kind: PieceState(Piece::T, RotationState::South),
+                    tspin: TspinStatus::None
+                })
             } else {
                 None
             }
@@ -544,174 +624,14 @@ fn cave_tslot(board: &Board, mut starting_point: FallingPiece) -> Option<(i32, i
     }
 }
 
-#[derive(Debug, Copy, Clone)]
-struct TstTwist {
-    point_left: bool,
-    is_tslot: bool,
-    x: i32,
-    y: i32,
-}
-
-impl TstTwist {
-    fn piece(&self) -> FallingPiece {
-        let orientation = if self.point_left {
-            RotationState::West
-        } else {
-            RotationState::East
-        };
-        FallingPiece {
-            kind: PieceState(Piece::T, orientation),
-            x: self.x,
-            y: self.y,
-            tspin: if self.is_tslot { TspinStatus::Full } else { TspinStatus::None }
-        }
-    }
-}
-
-/// Determines the existence and location of a reachable TST twist spot on the board.
-/// 
-/// That is, if looks for these with sky above:
-/// 
-/// ```
-/// []....{}    {}....[]
-/// ......{}    {}......
-/// ..[]            []..
-/// ....            ....
-/// ..                ..
-/// ```
-/// where the `{}` have the same occupied state
-fn tst_twist(board: &Board) -> Option<TstTwist> {
-    for (x, hs) in board.column_heights().windows(3).enumerate() {
-        let x = x as i32;
-        let (left_h, middle_h, right_h) = (hs[0], hs[1], hs[2]);
-        if left_h > middle_h && middle_h >= right_h {
-            // right-pointing TST slot
-            // only really know that rightmost column and the lower pivot block match
-            let is_tst_slot =
-                board.occupied(x, middle_h+1) &&
-                !board.occupied(x, middle_h) &&
-                !board.occupied(x, middle_h-1) &&
-                !board.occupied(x, middle_h-2) &&
-                !board.occupied(x+1, middle_h-2) &&
-                !board.occupied(x, middle_h-3) &&
-                board.occupied(x+3, middle_h) == board.occupied(x+3, middle_h+1);
-            if is_tst_slot {
-                return Some(TstTwist {
-                    point_left: false,
-                    x: x,
-                    y: middle_h-2,
-                    is_tslot: (
-                        board.occupied(x-1, middle_h-1) as usize +
-                        board.occupied(x-1, middle_h-3) as usize +
-                        board.occupied(x+1, middle_h-3) as usize
-                    ) >= 2
-                });
-            }
-        } else if right_h > middle_h && middle_h >= left_h {
-            // left-pointing TST slot
-            // only really know that rightmost column and the lower pivot block match
-            let is_tst_slot =
-                board.occupied(x+2, middle_h+1) &&
-                !board.occupied(x+2, middle_h) &&
-                !board.occupied(x+2, middle_h-1) &&
-                !board.occupied(x+2, middle_h-2) &&
-                !board.occupied(x+1, middle_h-2) &&
-                !board.occupied(x+2, middle_h-3) &&
-                board.occupied(x-1, middle_h) == board.occupied(x-1, middle_h+1);
-            if is_tst_slot {
-                return Some(TstTwist {
-                    point_left: true,
-                    x: x+2,
-                    y: middle_h-2,
-                    is_tslot: (
-                        board.occupied(x+1, middle_h-3) as usize +
-                        board.occupied(x+3, middle_h-1) as usize +
-                        board.occupied(x+3, middle_h-3) as usize
-                    ) >= 2
-                });
-            }
-        }
-    }
-    None
-}
-
-/// Finds this thing:
-/// ```
-/// ....[][]
-/// ........
-///   ......[]
-///   []....
-///     []..[]
-/// ```
-/// and the mirror version, with sky above.
-fn fin_to_win(board: &Board) -> Option<TstTwist> {
-    for x in 0..7 {
-        // left-pointing fin
-        let h = board.column_heights()[x as usize + 1];
-        if board.column_heights()[x as usize] <= h+1 &&
-                board.occupied(x+1, h-1) &&
-                board.occupied(x+2, h+2) && board.occupied(x+2, h-2) &&
-                board.occupied(x+3, h+2) &&
-                board.occupied(x+4, h) && board.occupied(x+4, h-2) &&
-                !board.occupied(x+2, h+1) && !board.occupied(x+3, h+1) &&
-                !board.occupied(x+2, h) && !board.occupied(x+3, h) &&
-                !board.occupied(x+2, h-1) && !board.occupied(x+3, h-1) &&
-                !board.occupied(x+3, h-2) {
-            return Some(TstTwist {
-                point_left: true,
-                is_tslot: true,
-                x: x+3,
-                y: h-1
-            });
-        }
-        // right-pointing fin
-        let h = board.column_heights()[x as usize + 2];
-        if board.column_heights()[x as usize + 3] <= h+1 &&
-                board.occupied(x, h+2) && board.occupied(x+1, h+2) &&
-                board.occupied(x+1, h-2) && board.occupied(x+2, h-1) &&
-                board.occupied(x-1, h) && board.occupied(x-1, h-2) &&
-                !board.occupied(x, h+1) && !board.occupied(x+1, h+1) &&
-                !board.occupied(x, h) && !board.occupied(x+1, h) &&
-                !board.occupied(x, h-1) && !board.occupied(x+1, h-1) &&
-                !board.occupied(x, h-2) {
-            return Some(TstTwist {
-                point_left: false,
-                is_tslot: true,
-                x,
-                y: h-1
-            });
-        }
-    }
-    None
-}
-
 struct Cutout {
     lines: usize,
     result: Option<Board>
 }
 
-fn cutout_tslot(mut board: Board, piece: FallingPiece) -> Cutout {
-    let result = if piece.kind.1 == RotationState::South {
-        board.lock_piece(piece)
-    } else {
-        let imperial = FallingPiece {
-            kind: PieceState(Piece::T, if piece.kind.1 == RotationState::East {
-                RotationState::West
-            } else {
-                RotationState::East
-            }),
-            ..piece
-        };
-        if !board.obstructed(&imperial) && board.on_stack(&imperial) {
-            board.lock_piece(imperial)
-        } else if board.on_stack(&piece) {
-            board.lock_piece(piece)
-        } else {
-            return Cutout {
-                lines: 0, result: None
-            };
-        }
-    };
+fn cutout_tslot(mut board: Board, mut piece: FallingPiece) -> Cutout {
+    piece.tspin = TspinStatus::Full;
+    let result = board.lock_piece(piece);
 
     match result.placement_kind {
         PlacementKind::Tspin => Cutout {

@@ -2,13 +2,15 @@ use serde::{ Serialize, Deserialize };
 use enum_map::EnumMap;
 use enumset::EnumSet;
 use libtetris::*;
-use crate::tree::{ ChildData, TreeState, NodeId };
-use crate::{ Options, Info };
+use opening_book::Book;
+// use crate::tree::{ ChildData, TreeState, NodeId };
+use crate::dag::{ DagState, NodeId, ChildData };
+use crate::Options;
 pub use crate::moves::Move;
 use crate::evaluation::Evaluator;
 
 pub struct BotState<E: Evaluator> {
-    tree: TreeState<E::Value, E::Reward>,
+    tree: DagState<E::Value, E::Reward>,
     options: Options,
     forced_analysis_lines: Vec<Vec<FallingPiece>>,
     pub outstanding_thinks: u32
@@ -31,7 +33,7 @@ pub enum ThinkResult<V, R> {
 impl<E: Evaluator> BotState<E> {
     pub fn new(board: Board, options: Options) -> Self {
         BotState {
-            tree: TreeState::create(board, options.use_hold),
+            tree: DagState::new(board, options.use_hold),
             options,
             forced_analysis_lines: vec![],
             outstanding_thinks: 0
@@ -42,7 +44,7 @@ impl<E: Evaluator> BotState<E> {
     /// 
     /// Returns `Err(true)` if a thinking cycle can be preformed, but it couldn't find 
     pub fn think(&mut self) -> Result<Thinker, bool> {
-        if (!self.min_thinking_reached() || self.tree.nodes < self.options.max_nodes)
+        if (!self.min_thinking_reached() || self.tree.nodes() < self.options.max_nodes)
                 && !self.tree.is_dead() {
             if let Some((node, board)) = self.tree.find_and_mark_leaf(
                 &mut self.forced_analysis_lines
@@ -99,10 +101,18 @@ impl<E: Evaluator> BotState<E> {
     }
 
     pub fn min_thinking_reached(&self) -> bool {
-        self.tree.nodes > self.options.min_nodes && self.forced_analysis_lines.is_empty()
+        self.tree.nodes() > self.options.min_nodes &&
+            self.forced_analysis_lines.is_empty() &&
+            !self.tree.get_next_candidates().is_empty()
     }
 
-    pub fn next_move(&mut self, eval: &E, incoming: u32, f: impl FnOnce(Move, Info)) -> bool {
+    pub fn next_move(
+        &mut self,
+        eval: &E,
+        book: Option<&Book>,
+        incoming: u32,
+        f: impl FnOnce(Move, crate::Info)
+    ) -> bool {
         if !self.min_thinking_reached() {
             return false
         }
@@ -111,20 +121,46 @@ impl<E: Evaluator> BotState<E> {
         if candidates.is_empty() {
             return false
         }
-        let child = eval.pick_move(candidates, incoming);
+        let mut book_move = None;
+        if let Some(book) = book {
+            if self.tree.board().column_heights().iter().all(|&h| h <= 10) {
+                book_move = book.suggest_move(self.tree.board()).first().copied();
+            }
+        }
+        let mut picked = None;
+        if let Some(book_move) = book_move {
+            for mv in &candidates {
+                if mv.mv.same_location(&book_move) {
+                    picked = Some(mv.clone());
+                }
+            }
+        }
+        if picked.is_none() && book_move.is_some() {
+            dbg!("book picked a move we can't do?");
+        }
+        let child = picked.unwrap_or_else(|| eval.pick_move(candidates, incoming));
 
-        let plan = self.tree.get_plan();
+        let plan = if book_move.is_none() {
+            self.tree.get_plan()
+        } else {
+            vec![]
+        };
 
-        let info = Info {
-            nodes: self.tree.nodes,
-            depth: self.tree.depth() as u32,
-            original_rank: child.original_rank,
-            plan,
+        let info = match book_move {
+            Some(mv) => crate::Info::Book(BookInfo {
+                name: "".to_string()
+            }),
+            None => crate::Info::Normal(Info {
+                nodes: if book_move.is_some() { 0 } else { self.tree.nodes() },
+                depth: if book_move.is_some() { 6 } else { self.tree.depth() as u32 },
+                original_rank: child.original_rank,
+                plan,
+            })
         };
 
         let inputs = crate::moves::find_moves(
-            &self.tree.board,
-            FallingPiece::spawn(child.mv.kind.0, &self.tree.board).unwrap(),
+            self.tree.board(),
+            self.options.spawn_rule.spawn(child.mv.kind.0, self.tree.board()).unwrap(),
             self.options.mode
         ).into_iter().find(|p| p.location == child.mv).unwrap().inputs;
         let mv = Move {
@@ -190,7 +226,7 @@ impl Thinker {
         let mut children = vec![];
 
         let next = board.advance_queue().unwrap();
-        let spawned = match FallingPiece::spawn(next, &board) {
+        let spawned = match self.options.spawn_rule.spawn(next, &board) {
             Some(spawned) => spawned,
             None => return children
         };
@@ -202,7 +238,7 @@ impl Thinker {
             if hold == next {
                 return children
             }
-            let spawned = match FallingPiece::spawn(hold, &board) {
+            let spawned = match self.options.spawn_rule.spawn(hold, &board) {
                 Some(spawned) => spawned,
                 None => return children
             };
@@ -229,17 +265,29 @@ impl Thinker {
             // Don't add deaths by lock out, don't add useless mini tspins
             if !lock.locked_out && !(can_be_hd && lock.placement_kind == PlacementKind::MiniTspin) {
                 let move_time = mv.inputs.time + if hold { 1 } else { 0 };
-                let (evaluation, accumulated) = eval.evaluate(
+                let (evaluation, reward) = eval.evaluate(
                     &lock, &result, move_time, spawned.kind.0
                 );
                 children.push(ChildData {
                     evaluation,
-                    accumulated,
+                    reward,
                     board: result,
-                    hold,
                     mv: mv.location
                 });
             }
         }
     }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Hash)]
+pub struct Info {
+    pub nodes: u32,
+    pub depth: u32,
+    pub original_rank: u32,
+    pub plan: Vec<(FallingPiece, LockResult)>
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Hash)]
+pub struct BookInfo {
+    pub name: String
 }

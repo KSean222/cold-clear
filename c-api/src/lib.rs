@@ -1,4 +1,5 @@
 use std::mem::MaybeUninit;
+use enumset::EnumSet;
 
 type CCAsyncBot = cold_clear::Interface;
 
@@ -43,12 +44,12 @@ macro_rules! cenum {
 cenum! {
     enum CCPiece => libtetris::Piece {
         CC_I => I,
-        CC_T => T,
         CC_O => O,
-        CC_S => S,
-        CC_Z => Z,
+        CC_T => T,
         CC_L => L,
-        CC_J => J
+        CC_J => J,
+        CC_S => S,
+        CC_Z => Z
     }
 
     enum CCTspinStatus => libtetris::TspinStatus {
@@ -63,6 +64,11 @@ cenum! {
         CC_CW => Cw,
         CC_CCW => Ccw,
         CC_DROP => SonicDrop
+    }
+
+    enum CCSpawnRule => libtetris::SpawnRule {
+        CC_ROW_19_OR_20 => Row19Or20,
+        CC_ROW_21_AND_FALL => Row21AndFall
     }
 
     enum CCMovementMode => cold_clear::moves::MovementMode {
@@ -107,6 +113,7 @@ struct CCPlanPlacement {
 #[repr(C)]
 struct CCOptions {
     mode: CCMovementMode,
+    spawn_rule: CCSpawnRule,
     use_hold: bool,
     speculate: bool,
     pcloop: bool,
@@ -120,6 +127,7 @@ struct CCWeights {
     back_to_back: i32,
     bumpiness: i32,
     bumpiness_sq: i32,
+    row_transitions: i32,
     height: i32,
     top_half: i32,
     top_quarter: i32,
@@ -151,58 +159,93 @@ struct CCWeights {
     wasted_t: i32,
 
     use_bag: bool,
+    timed_jeopardy: bool,
+    stack_pc_damage: bool,
+}
+
+fn convert_hold(hold: *mut CCPiece) -> Option<libtetris::Piece> {
+    if hold.is_null() {
+        None
+    } else {
+        Some(unsafe{*hold}.into())
+    }
+}
+
+
+fn convert_from_c_options(options: &CCOptions) -> cold_clear::Options {
+    cold_clear::Options {
+        max_nodes: options.max_nodes,
+        min_nodes: options.min_nodes,
+        use_hold: options.use_hold,
+        speculate: options.speculate,
+        pcloop: options.pcloop,
+        mode: options.mode.into(),
+        spawn_rule: options.spawn_rule.into(),
+        threads: options.threads
+    }
+}
+
+fn convert_from_c_weights(weights: &CCWeights) -> cold_clear::evaluation::Standard {
+    cold_clear::evaluation::Standard {
+        back_to_back: weights.back_to_back,
+        bumpiness: weights.bumpiness,
+        bumpiness_sq: weights.bumpiness_sq,
+        row_transitions: weights.row_transitions,
+        height: weights.height,
+        top_half: weights.top_half,
+        top_quarter: weights.top_quarter,
+        jeopardy: weights.jeopardy,
+        cavity_cells: weights.cavity_cells,
+        cavity_cells_sq: weights.cavity_cells_sq,
+        overhang_cells: weights.overhang_cells,
+        overhang_cells_sq: weights.overhang_cells_sq,
+        covered_cells: weights.covered_cells,
+        covered_cells_sq: weights.covered_cells_sq,
+        tslot: weights.tslot,
+        well_depth: weights.well_depth,
+        max_well_depth: weights.max_well_depth,
+        well_column: weights.well_column,
+
+        b2b_clear: weights.b2b_clear,
+        clear1: weights.clear1,
+        clear2: weights.clear2,
+        clear3: weights.clear3,
+        clear4: weights.clear4,
+        tspin1: weights.tspin1,
+        tspin2: weights.tspin2,
+        tspin3: weights.tspin3,
+        mini_tspin1: weights.mini_tspin1,
+        mini_tspin2: weights.mini_tspin2,
+        perfect_clear: weights.perfect_clear,
+        combo_garbage: weights.combo_garbage,
+        move_time: weights.move_time,
+        wasted_t: weights.wasted_t,
+
+        use_bag: weights.use_bag,
+        timed_jeopardy: weights.timed_jeopardy,
+        stack_pc_damage: weights.stack_pc_damage,
+        sub_name: None
+    }
+}
+
+#[no_mangle]
+extern "C" fn cc_launch_with_board_async(options: &CCOptions, weights: &CCWeights, field: &[[bool; 10]; 40], 
+    bag_remain: u32, hold: *mut CCPiece, b2b: bool, combo: u32) -> *mut CCAsyncBot {
+    Box::into_raw(Box::new(cold_clear::Interface::launch(
+        libtetris::Board::new_with_state(*field, EnumSet::from_bits(bag_remain as u128), convert_hold(hold), b2b, combo),
+        convert_from_c_options(options),
+        convert_from_c_weights(weights),
+        None // TODO
+    )))
 }
 
 #[no_mangle]
 extern "C" fn cc_launch_async(options: &CCOptions, weights: &CCWeights) -> *mut CCAsyncBot {
     Box::into_raw(Box::new(cold_clear::Interface::launch(
         libtetris::Board::new(),
-        cold_clear::Options {
-            max_nodes: options.max_nodes,
-            min_nodes: options.min_nodes,
-            use_hold: options.use_hold,
-            speculate: options.speculate,
-            pcloop: options.pcloop,
-            mode: options.mode.into(),
-            threads: options.threads
-        },
-        cold_clear::evaluation::Standard {
-            back_to_back: weights.back_to_back,
-            bumpiness: weights.bumpiness,
-            bumpiness_sq: weights.bumpiness_sq,
-            height: weights.height,
-            top_half: weights.top_half,
-            top_quarter: weights.top_quarter,
-            jeopardy: weights.jeopardy,
-            cavity_cells: weights.cavity_cells,
-            cavity_cells_sq: weights.cavity_cells_sq,
-            overhang_cells: weights.overhang_cells,
-            overhang_cells_sq: weights.overhang_cells_sq,
-            covered_cells: weights.covered_cells,
-            covered_cells_sq: weights.covered_cells_sq,
-            tslot: weights.tslot,
-            well_depth: weights.well_depth,
-            max_well_depth: weights.max_well_depth,
-            well_column: weights.well_column,
-
-            b2b_clear: weights.b2b_clear,
-            clear1: weights.clear1,
-            clear2: weights.clear2,
-            clear3: weights.clear3,
-            clear4: weights.clear4,
-            tspin1: weights.tspin1,
-            tspin2: weights.tspin2,
-            tspin3: weights.tspin3,
-            mini_tspin1: weights.mini_tspin1,
-            mini_tspin2: weights.mini_tspin2,
-            perfect_clear: weights.perfect_clear,
-            combo_garbage: weights.combo_garbage,
-            move_time: weights.move_time,
-            wasted_t: weights.wasted_t,
-
-            use_bag: weights.use_bag,
-            sub_name: None
-        }
+        convert_from_c_options(options),
+        convert_from_c_weights(weights),
+        None // TODO
     )))
 }
 
@@ -262,9 +305,9 @@ fn convert_plan(
         let plan = unsafe {
             std::slice::from_raw_parts_mut(plan, *plan_length as usize)
         };
-        let n = info.plan.len().min(plan.len());
+        let n = info.plan().len().min(plan.len());
         for i in 0..n {
-            plan[i] = MaybeUninit::new(convert_plan_placement(&info.plan[i]));
+            plan[i] = MaybeUninit::new(convert_plan_placement(&info.plan()[i]));
         }
         *plan_length = n as u32;
     }
@@ -287,9 +330,21 @@ fn convert(m: cold_clear::Move, info: cold_clear::Info) -> CCMove {
         expected_y,
         movement_count: m.inputs.len() as u8,
         movements,
-        nodes: info.nodes as u32,
-        depth: info.depth as u32,
-        original_rank: info.original_rank as u32,
+        nodes: match &info {
+            cold_clear::Info::Normal(info) => info.nodes as u32,
+            cold_clear::Info::PcLoop(_) => 0,
+            cold_clear::Info::Book(_) => 0,
+        },
+        depth: match &info {
+            cold_clear::Info::Normal(info) => info.depth as u32,
+            cold_clear::Info::PcLoop(info) => info.depth as u32,
+            cold_clear::Info::Book(_) => 0,
+        },
+        original_rank: match &info {
+            cold_clear::Info::Normal(info) => info.original_rank as u32,
+            cold_clear::Info::PcLoop(_) => 0,
+            cold_clear::Info::Book(_) => 0,
+        }
     }
 }
 
@@ -338,6 +393,7 @@ unsafe extern "C" fn cc_default_options(options: *mut CCOptions) {
         speculate: o.speculate,
         pcloop: o.pcloop,
         mode: o.mode.into(),
+        spawn_rule: o.spawn_rule.into(),
         threads: o.threads
     });
 }
@@ -347,6 +403,7 @@ fn convert_weights(w: cold_clear::evaluation::Standard) -> CCWeights {
         back_to_back: w.back_to_back,
         bumpiness: w.bumpiness,
         bumpiness_sq: w.bumpiness_sq,
+        row_transitions: w.row_transitions,
         height: w.height,
         top_half: w.top_half,
         top_quarter: w.top_quarter,
@@ -377,7 +434,9 @@ fn convert_weights(w: cold_clear::evaluation::Standard) -> CCWeights {
         move_time: w.move_time,
         wasted_t: w.wasted_t,
 
-        use_bag: w.use_bag
+        use_bag: w.use_bag,
+        timed_jeopardy: w.timed_jeopardy,
+        stack_pc_damage: w.stack_pc_damage
     }
 }
 

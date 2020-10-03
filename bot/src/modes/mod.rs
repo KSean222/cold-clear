@@ -1,4 +1,5 @@
 use libtetris::*;
+use opening_book::Book;
 use crate::evaluation::Evaluator;
 use crate::{ Options, Info, Move, BotMsg };
 use serde::{ Serialize, Deserialize };
@@ -6,7 +7,7 @@ use arrayvec::ArrayVec;
 
 pub mod normal;
 #[cfg(not(target_arch = "wasm32"))]
-mod pcloop;
+pub mod pcloop;
 
 enum Mode<E: Evaluator> {
     Normal(normal::BotState<E>),
@@ -25,15 +26,16 @@ pub(crate) enum TaskResult<V, R> {
     PcLoopSolve(Option<ArrayVec<[FallingPiece; 10]>>)
 }
 
-pub(crate) struct ModeSwitchedBot<E: Evaluator> {
+pub(crate) struct ModeSwitchedBot<'a, E: Evaluator> {
     mode: Mode<E>,
     options: Options,
     board: Board,
-    do_move: Option<u32>
+    do_move: Option<u32>,
+    book: Option<&'a Book>
 }
 
-impl<E: Evaluator> ModeSwitchedBot<E> {
-    pub fn new(board: Board, options: Options) -> Self {
+impl<'a, E: Evaluator> ModeSwitchedBot<'a, E> {
+    pub fn new(board: Board, options: Options, book: Option<&'a Book>) -> Self {
         #[cfg(target_arch = "wasm32")]
         let mode = Mode::Normal(normal::BotState::new(board.clone(), options));
         #[cfg(not(target_arch = "wasm32"))]
@@ -46,7 +48,8 @@ impl<E: Evaluator> ModeSwitchedBot<E> {
         };
         ModeSwitchedBot {
             mode, options, board,
-            do_move: None
+            do_move: None,
+            book
         }
     }
 
@@ -121,7 +124,7 @@ impl<E: Evaluator> ModeSwitchedBot<E> {
         match &mut self.mode {
             Mode::Normal(bot) => {
                 if let Some(incoming) = self.do_move {
-                    if bot.next_move(eval, incoming, send_move) {
+                    if bot.next_move(eval, self.book, incoming, send_move) {
                         self.do_move = None;
                         #[cfg(not(target_arch = "wasm32"))] {
                             if self.options.pcloop && can_pc_loop(board, self.options.use_hold) {
@@ -154,7 +157,7 @@ impl<E: Evaluator> ModeSwitchedBot<E> {
                 if let Some(_) = self.do_move {
                     match bot.next_move() {
                         Ok((mv, info)) => {
-                            send_move(mv, info);
+                            send_move(mv, Info::PcLoop(info));
                             self.do_move = None;
                         }
                         Err(false) => {}

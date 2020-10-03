@@ -5,7 +5,7 @@
 typedef struct CCAsyncBot CCAsyncBot;
 
 typedef enum CCPiece {
-    CC_I, CC_T, CC_O, CC_S, CC_Z, CC_L, CC_J
+    CC_I, CC_O, CC_T, CC_L, CC_J, CC_S, CC_Z
 } CCPiece;
 
 typedef enum CCTspinStatus {
@@ -26,6 +26,11 @@ typedef enum CCMovementMode {
     CC_20G,
     CC_HARD_DROP_ONLY
 } CCMovementMode;
+
+typedef enum CCSpawnRule {
+    CC_ROW_19_OR_20,
+    CC_ROW_21_AND_FALL,
+} CCSpawnRule;
 
 typedef enum CCBotPollStatus {
     CC_MOVE_PROVIDED,
@@ -64,6 +69,7 @@ typedef struct CCMove {
 
 typedef struct CCOptions {
     CCMovementMode mode;
+    CCSpawnRule spawn_rule;
     bool use_hold;
     bool speculate;
     bool pcloop;
@@ -76,6 +82,7 @@ typedef struct CCWeights {
     int32_t back_to_back;
     int32_t bumpiness;
     int32_t bumpiness_sq;
+    int32_t row_transitions;
     int32_t height;
     int32_t top_half;
     int32_t top_quarter;
@@ -107,6 +114,8 @@ typedef struct CCWeights {
     int32_t wasted_t;
 
     bool use_bag;
+    bool timed_jeopardy;
+    bool stack_pc_damage;
 } CCWeights;
 
 /* Launches a bot thread with a blank board, empty queue, and all seven pieces in the bag, using the
@@ -117,6 +126,21 @@ typedef struct CCWeights {
  * Lifetime: The returned pointer is valid until it is passed to `cc_destroy_async`.
  */
 CCAsyncBot *cc_launch_async(CCOptions *options, CCWeights *weights);
+
+/* Launches a bot thread with a predefined field, empty queue, remaining pieces in the bag, hold piece,
+ * back-to-back status, and combo count. This allows you to start CC from the middle of a game.
+ * 
+ * The bag_remain parameter is a bit field indicating which pieces are still in the bag. Each bit
+ * correspond to CCPiece enum. This must match the next few pieces provided to CC via
+ * cc_add_next_piece_async later.
+ * 
+ * The field parameter is a pointer to the start of an array of 400 booleans in row major order,
+ * with index 0 being the bottom-left cell.
+ * 
+ * The hold parameter is a pointer to the current hold piece, or `NULL` if there's no hold piece now.
+ */
+CCAsyncBot *cc_launch_with_board_async(CCOptions *options, CCWeights *weights, bool *field,
+    uint32_t bag_remain, CCPiece *hold, bool b2b, uint32_t combo);
 
 /* Terminates the bot thread and frees the memory associated with the bot.
  */
@@ -211,5 +235,5 @@ void cc_default_options(CCOptions *options);
 /* Returns the default weights in the weights parameter */
 void cc_default_weights(CCWeights *weights);
 
-/* Resturns the fast game config weights in the weights parameter */
+/* Returns the fast game config weights in the weights parameter */
 void cc_fast_weights(CCWeights *weights);

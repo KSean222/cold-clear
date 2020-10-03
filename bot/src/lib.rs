@@ -1,9 +1,13 @@
 use serde::{ Serialize, Deserialize };
+pub use opening_book::Book;
+
+#[macro_use]
+extern crate rental;
 
 pub mod evaluation;
 pub mod moves;
 mod modes;
-mod tree;
+mod dag;
 
 #[cfg(not(target_arch = "wasm32"))]
 mod desktop;
@@ -23,6 +27,7 @@ pub use crate::modes::normal::{ BotState, ThinkResult, Thinker };
 #[serde(default)]
 pub struct Options {
     pub mode: crate::moves::MovementMode,
+    pub spawn_rule: SpawnRule,
     pub use_hold: bool,
     pub speculate: bool,
     pub pcloop: bool,
@@ -45,13 +50,23 @@ enum BotMsg {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, Hash)]
-pub struct Info {
-    pub nodes: u32,
-    pub depth: u32,
-    pub original_rank: u32,
-    pub plan: Vec<(FallingPiece, LockResult)>
+pub enum Info {
+    Normal(modes::normal::Info),
+    Book(modes::normal::BookInfo),
+    PcLoop(modes::pcloop::Info)
 }
 
+impl Info {
+    pub fn plan(&self) -> &[(FallingPiece, LockResult)] {
+        match self {
+            Info::Normal(info) => &info.plan,
+            Info::PcLoop(info) => &info.plan,
+            Info::Book(_) => &[]
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 pub enum BotPollState {
     Waiting,
     Dead
@@ -61,6 +76,7 @@ impl Default for Options {
     fn default() -> Self {
         Options {
             mode: crate::moves::MovementMode::ZeroG,
+            spawn_rule: SpawnRule::Row19Or20,
             use_hold: true,
             speculate: true,
             pcloop: false,

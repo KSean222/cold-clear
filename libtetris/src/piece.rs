@@ -13,25 +13,6 @@ pub struct FallingPiece {
 }
 
 impl FallingPiece {
-    pub fn spawn<R: Row>(piece: Piece, board: &Board<R>) -> Option<FallingPiece> {
-        let mut this = FallingPiece {
-            kind: PieceState(piece, RotationState::North),
-            x: 4, y: 20,
-            tspin: TspinStatus::None
-        };
-
-        if board.obstructed(&this) {
-            None
-        } else {
-            this.y -= 1;
-            if board.obstructed(&this) {
-                this.y += 1;
-            }
-
-            Some(this)
-        }
-    }
-
     #[inline]
     pub fn cells(&self) -> [(i32, i32); 4] {
         let mut cells = self.kind.cells();
@@ -147,6 +128,14 @@ impl FallingPiece {
         let mut target = self.kind;
         target.ccw();
         self.rotate(target, board)
+    }
+
+    pub fn same_location(&self, other: &Self) -> bool {
+        let mut self_cells = self.cells();
+        self_cells.sort();
+        let mut other_cells = other.cells();
+        other_cells.sort();
+        self_cells == other_cells
     }
 }
 
@@ -419,5 +408,44 @@ impl Direction {
             Direction::Down => Direction::Up,
             Direction::Left => Direction::Right,
         }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, Serialize, Deserialize)]
+pub enum SpawnRule {
+    Row19Or20,
+    Row21AndFall
+}
+
+impl SpawnRule {
+    pub fn spawn<R: Row>(self, piece: Piece, board: &Board<R>) -> Option<FallingPiece> {
+        match self {
+            SpawnRule::Row19Or20 => {
+                let mut spawned = FallingPiece {
+                    kind: PieceState(piece, RotationState::North),
+                    x: 4, y: 19,
+                    tspin: TspinStatus::None
+                };
+                if !board.obstructed(&spawned) {
+                    return Some(spawned);
+                }
+                spawned.y += 1;
+                if !board.obstructed(&spawned) {
+                    return Some(spawned);
+                }
+            }
+            SpawnRule::Row21AndFall => {
+                let mut spawned = FallingPiece {
+                    kind: PieceState(piece, RotationState::North),
+                    x: 4, y: 21,
+                    tspin: TspinStatus::None
+                };
+                if !board.obstructed(&spawned) {
+                    spawned.shift(board, 0, -1);
+                    return Some(spawned);
+                }
+            }
+        }
+        None
     }
 }
