@@ -4,6 +4,7 @@ use crate::evaluation::Evaluator;
 use crate::{ Options, Info, Move, BotMsg };
 use serde::{ Serialize, Deserialize };
 use arrayvec::ArrayVec;
+use crate::evaluation::standard::get_c4w_data;
 
 pub mod normal;
 #[cfg(not(target_arch = "wasm32"))]
@@ -267,11 +268,18 @@ fn can_pc_loop(board: &Board, hold_enabled: bool) -> bool {
 }
 
 fn should_combo(board: &Board) -> bool {
-    crate::evaluation::standard::c4w_rows(board) > 10
+    let mut rows = 0;
+    for y in get_c4w_data(board) {
+        if y > 20 {
+            return true;
+        }
+        rows += 1;
+    }
+    rows > 10
 }
 
 fn should_stop_combo(board: &Board) -> bool {
-    crate::evaluation::standard::c4w_rows(board) < 5 && board.combo == 0
+    get_c4w_data(board).count() < 5 && board.combo == 0
 }
 
 #[cfg(target_arch = "wasm32")]
