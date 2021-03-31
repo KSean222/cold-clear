@@ -249,6 +249,8 @@ where
                         None => {
                             let buf = std::io::BufReader::new(std::fs::File::open(path).ok()?);
                             let book = Book::load(buf).ok()?;
+                            // let mut file = std::fs::File::create("./test.ccdb").unwrap();
+                            // opening_book::make_disk_book(&mut file, &book).unwrap();
                             let book = std::sync::Arc::new(book);
                             *book_cache = Some(book.clone());
                             Some(book)

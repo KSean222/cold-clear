@@ -3,6 +3,7 @@ use enumset::EnumSet;
 use serde::{ Serialize, Deserialize };
 use std::collections::HashMap;
 use std::io::prelude::*;
+use std::io::SeekFrom;
 
 const NEXT_PIECES: usize = 4;
 
@@ -68,6 +69,80 @@ impl Book {
         }
     }
 }
+
+#[derive(Clone, Debug)]
+pub struct DiskBook<I>(I, HashMap<Position, u64>);
+
+pub fn make_disk_book(dest: &mut impl Write, book: &Book) -> std::io::Result<()> {
+    ///bincode to io error
+    fn bc2io(err: bincode::Error) -> std::io::Error {
+        if let bincode::ErrorKind::Io(err) = *err {
+            err
+        } else {
+            panic!()
+        }
+    }
+
+    let mut map = HashMap::with_capacity(book.0.len());
+    let mut entry_index = 0;
+    for (position, entry) in &book.0 {
+        bincode::serialize_into(&mut *dest, entry).map_err(bc2io)?;
+        map.insert(position, entry_index);
+        entry_index += bincode::serialized_size(entry).map_err(bc2io)?;
+    }
+    bincode::serialize_into(&mut *dest, &map).map_err(bc2io)?;
+    dest.write_all(&entry_index.to_le_bytes())?;
+    Ok(())
+}
+
+///io to bincode error
+fn io2bc(err: std::io::Error) -> bincode::Error {
+    bincode::Error::new(bincode::ErrorKind::Io(err))
+}
+
+impl<I: Read + Seek> DiskBook<I> {
+    pub fn load(mut from: I) -> Result<Self, bincode::Error> {
+        from.seek(SeekFrom::End(-8)).map_err(io2bc)?;
+        let mut map_offset = [0; 8];
+        from.read_exact(&mut map_offset).map_err(io2bc)?;
+        let map_offset = u64::from_le_bytes(map_offset);
+        from.seek(SeekFrom::Start(map_offset)).map_err(io2bc)?;
+        let map = bincode::deserialize_from(&mut from)?;
+        Ok(Self(from, map))
+    }
+
+    pub fn suggest_move(&mut self, state: &Board) -> Result<Option<FallingPiece>, bincode::Error> {
+        Ok({
+            if let Some((offset, seq)) = self.get_entry_position(state) {
+                self.0.seek(SeekFrom::Start(offset)).map_err(io2bc)?;
+                let moves: Box<[(Sequence, Option<CompactPiece>)]>
+                    = bincode::deserialize_from(&mut self.0)?;
+                match moves.binary_search_by_key(&seq, |&(s,_)| s) {
+                    Result::Ok(i) => moves[i].1.map(Into::into),
+                    Result::Err(i) => moves[i-1].1.map(Into::into)
+                }
+            } else {
+                None
+            }
+        })
+    }
+
+    fn get_entry_position(&self, state: &Board) -> Option<(u64, Sequence)> {
+        let position = state.into();
+        let mut next = EnumSet::empty();
+        let mut q = state.next_queue();
+        next.insert(q.next()?);
+        if let Some(p) = state.hold_piece {
+            next.insert(p);
+        } else {
+            next.insert(q.next()?);
+        }
+        let q = [q.next()?, q.next()?, q.next()?, q.next()?];
+        let o = *self.1.get(&position)?;
+        Some((o, Sequence { next, queue: q }))
+    }
+}
+
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
 pub struct Position {
