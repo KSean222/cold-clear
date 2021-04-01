@@ -4,6 +4,7 @@ use serde::{ Serialize, Deserialize };
 use std::collections::HashMap;
 use std::io::prelude::*;
 use std::io::SeekFrom;
+use std::sync::Mutex;
 
 const NEXT_PIECES: usize = 4;
 
@@ -11,11 +12,30 @@ const NEXT_PIECES: usize = 4;
 mod builder;
 #[cfg(feature = "builder")]
 pub use builder::BookBuilder;
+pub trait Book {
+    fn suggest_move(&self, state: &Board) -> Option<FallingPiece>;
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Book(HashMap<Position, Box<[(Sequence, Option<CompactPiece>)]>>);
+pub struct MemoryBook(HashMap<Position, Box<[(Sequence, Option<CompactPiece>)]>>);
 
-impl Book {
+impl Book for MemoryBook {
+    fn suggest_move(&self, state: &Board) -> Option<FallingPiece> {
+        let position = state.into();
+        let mut next = EnumSet::empty();
+        let mut q = state.next_queue();
+        next.insert(q.next()?);
+        if let Some(p) = state.hold_piece {
+            next.insert(p);
+        } else {
+            next.insert(q.next()?);
+        }
+        let q = [q.next()?, q.next()?, q.next()?, q.next()?];
+        self.suggest_move_raw(position, next, q)
+    }
+}
+
+impl MemoryBook {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn load(from: impl BufRead) -> Result<Self, bincode::Error> {
         bincode::deserialize_from(zstd::Decoder::new(from)?)
@@ -38,20 +58,6 @@ impl Book {
         Ok(())
     }
 
-    pub fn suggest_move(&self, state: &Board) -> Option<FallingPiece> {
-        let position = state.into();
-        let mut next = EnumSet::empty();
-        let mut q = state.next_queue();
-        next.insert(q.next()?);
-        if let Some(p) = state.hold_piece {
-            next.insert(p);
-        } else {
-            next.insert(q.next()?);
-        }
-        let q = [q.next()?, q.next()?, q.next()?, q.next()?];
-        self.suggest_move_raw(position, next, q)
-    }
-
     fn suggest_move_raw(
         &self, pos: Position, next: EnumSet<Piece>, queue: [Piece; NEXT_PIECES]
     ) -> Option<FallingPiece> {
@@ -63,17 +69,17 @@ impl Book {
         }
     }
 
-    pub fn merge(&mut self, other: Book) {
+    pub fn merge(&mut self, other: MemoryBook) {
         for (pos, data) in other.0 {
             self.0.entry(pos).or_insert(data);
         }
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct DiskBook<I>(I, HashMap<Position, u64>);
+#[derive(Debug)]
+pub struct DiskBook<I>(Mutex<I>, HashMap<Position, u64>);
 
-pub fn make_disk_book(dest: &mut impl Write, book: &Book) -> std::io::Result<()> {
+pub fn make_disk_book(dest: &mut impl Write, book: &MemoryBook) -> std::io::Result<()> {
     ///bincode to io error
     fn bc2io(err: bincode::Error) -> std::io::Error {
         if let bincode::ErrorKind::Io(err) = *err {
@@ -95,36 +101,37 @@ pub fn make_disk_book(dest: &mut impl Write, book: &Book) -> std::io::Result<()>
     Ok(())
 }
 
-///io to bincode error
-fn io2bc(err: std::io::Error) -> bincode::Error {
-    bincode::Error::new(bincode::ErrorKind::Io(err))
+impl<I: Read + Seek> Book for DiskBook<I> {
+    fn suggest_move(&self, state: &Board) -> Option<FallingPiece> {
+        if let Some((offset, seq)) = self.get_entry_position(state) {
+            let mut inner = self.0.lock().ok()?;
+            inner.seek(SeekFrom::Start(offset)).ok()?;
+            let moves: Box<[(Sequence, Option<CompactPiece>)]>
+                = bincode::deserialize_from(&mut *inner).ok()?;
+            match moves.binary_search_by_key(&seq, |&(s,_)| s) {
+                Result::Ok(i) => moves[i].1.map(Into::into),
+                Result::Err(i) => moves[i-1].1.map(Into::into)
+            }
+        } else {
+            None
+        }
+    }
 }
 
 impl<I: Read + Seek> DiskBook<I> {
-    pub fn load(mut from: I) -> Result<Self, bincode::Error> {
+    pub fn load(mut from: I) -> Result<Self, bincode::Error> {        
+        ///io to bincode error
+        fn io2bc(err: std::io::Error) -> bincode::Error {
+            bincode::Error::new(bincode::ErrorKind::Io(err))
+        }
+
         from.seek(SeekFrom::End(-8)).map_err(io2bc)?;
         let mut map_offset = [0; 8];
         from.read_exact(&mut map_offset).map_err(io2bc)?;
         let map_offset = u64::from_le_bytes(map_offset);
         from.seek(SeekFrom::Start(map_offset)).map_err(io2bc)?;
         let map = bincode::deserialize_from(&mut from)?;
-        Ok(Self(from, map))
-    }
-
-    pub fn suggest_move(&mut self, state: &Board) -> Result<Option<FallingPiece>, bincode::Error> {
-        Ok({
-            if let Some((offset, seq)) = self.get_entry_position(state) {
-                self.0.seek(SeekFrom::Start(offset)).map_err(io2bc)?;
-                let moves: Box<[(Sequence, Option<CompactPiece>)]>
-                    = bincode::deserialize_from(&mut self.0)?;
-                match moves.binary_search_by_key(&seq, |&(s,_)| s) {
-                    Result::Ok(i) => moves[i].1.map(Into::into),
-                    Result::Err(i) => moves[i-1].1.map(Into::into)
-                }
-            } else {
-                None
-            }
-        })
+        Ok(Self(Mutex::new(from), map))
     }
 
     fn get_entry_position(&self, state: &Board) -> Option<(u64, Sequence)> {

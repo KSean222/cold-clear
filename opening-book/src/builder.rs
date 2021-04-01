@@ -197,7 +197,7 @@ impl BookBuilder {
         self.data.keys().copied()
     }
 
-    pub fn compile(mut self, roots: &[Position]) -> Book {
+    pub fn compile(mut self, roots: &[Position]) -> MemoryBook {
         self.data.retain(|_, v| !v.values.is_empty());
         let mut book = HashMap::new();
         let mut to_compile = roots.to_vec();
@@ -215,7 +215,7 @@ impl BookBuilder {
                 moves.into_boxed_slice()
             });
         }
-        Book(book)
+        MemoryBook(book)
     }
 
     fn build_position(&mut self, pos: &Position) -> Vec<(Sequence, Option<CompactPiece>)> {

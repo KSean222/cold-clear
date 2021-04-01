@@ -10,7 +10,7 @@ use cold_clear::PcPriority;
 
 type CCAsyncBot = cold_clear::Interface;
 
-type CCBook = cold_clear::Book;
+type CCBook = dyn cold_clear::Book + Send + Sync;
 
 macro_rules! cenum {
     (@match $v:ident $name:ident $($item:ident => $to:expr),*) => {
@@ -261,7 +261,7 @@ fn convert_from_c_weights(weights: &CCWeights) -> cold_clear::evaluation::Standa
 unsafe extern "C" fn cc_launch_with_board_async(
     options: &CCOptions,
     weights: &CCWeights,
-    book: *const CCBook,
+    book: *const Arc<CCBook>,
     field: &[[bool; 10]; 40],
     bag_remain: u32,
     hold: *mut CCPiece,
@@ -280,12 +280,7 @@ unsafe extern "C" fn cc_launch_with_board_async(
     for i in 0..count as usize {
         board.add_next_piece((*pieces.add(i)).into());
     }
-    let book = if book.is_null() {
-        None
-    } else {
-        Arc::increment_strong_count(book);
-        Some(Arc::from_raw(book))
-    };
+    let book = book.as_ref().map(Arc::clone);
     Box::into_raw(Box::new(cold_clear::Interface::launch(
         board,
         convert_from_c_options(options),
@@ -298,7 +293,7 @@ unsafe extern "C" fn cc_launch_with_board_async(
 unsafe extern "C" fn cc_launch_async(
     options: &CCOptions,
     weights: &CCWeights,
-    book: *const CCBook,
+    book: *const Arc<CCBook>,
     pieces: *const CCPiece,
     count: u32
 ) -> *mut CCAsyncBot {
@@ -306,12 +301,7 @@ unsafe extern "C" fn cc_launch_async(
     for i in 0..count as usize {
         board.add_next_piece((*pieces.add(i)).into());
     }
-    let book = if book.is_null() {
-        None
-    } else {
-        Arc::increment_strong_count(book);
-        Some(Arc::from_raw(book))
-    };
+    let book = book.as_ref().map(Arc::clone);
     Box::into_raw(Box::new(cold_clear::Interface::launch(
         board,
         convert_from_c_options(options),
@@ -524,19 +514,34 @@ unsafe extern "C" fn cc_fast_weights(weights: *mut CCWeights) {
 }
 
 #[no_mangle]
-unsafe extern "C" fn cc_load_book_from_file(path: *const c_char) -> *const CCBook {
+unsafe extern "C" fn cc_load_book_from_file(path: *const c_char) -> *mut Arc<CCBook> {
     let result = (|| {
         let path = CStr::from_ptr(path).to_str().ok()?;
         let file = std::io::BufReader::new(std::fs::File::open(path).ok()?);
-        Some(Arc::new(cold_clear::Book::load(file).ok()?))
+        let book: Arc<CCBook> = Arc::new(cold_clear::MemoryBook::load(file).ok()?);
+        Some(book)
     })();
     match result {
-        Some(book) => Arc::into_raw(book),
-        None => std::ptr::null(),
+        Some(book) => Box::leak(Box::new(book)) as *mut _,
+        None => std::ptr::null_mut(),
     }
 }
 
 #[no_mangle]
-unsafe extern "C" fn cc_destroy_book(book: *const CCBook) {
-    Arc::from_raw(book);
+unsafe extern "C" fn cc_load_disk_book_from_file(path: *const c_char) -> *mut Arc<CCBook> {
+    let result = (|| {
+        let path = CStr::from_ptr(path).to_str().ok()?;
+        let file = std::io::BufReader::new(std::fs::File::open(path).ok()?);
+        let book: Arc<CCBook> = Arc::new(cold_clear::DiskBook::load(file).ok()?);
+        Some(book)
+    })();
+    match result {
+        Some(book) => Box::leak(Box::new(book)) as *mut _,
+        None => std::ptr::null_mut(),
+    }
+}
+
+#[no_mangle]
+unsafe extern "C" fn cc_destroy_book(book: *mut Arc<CCBook>) {
+    Box::from_raw(book);
 }

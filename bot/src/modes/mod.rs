@@ -31,11 +31,11 @@ pub(crate) struct ModeSwitchedBot<'a, E: Evaluator> {
     options: Options,
     board: Board,
     do_move: Option<u32>,
-    book: Option<&'a Book>
+    book: Option<&'a (dyn Book + Send + Sync)>
 }
 
 impl<'a, E: Evaluator> ModeSwitchedBot<'a, E> {
-    pub fn new(board: Board, options: Options, book: Option<&'a Book>) -> Self {
+    pub fn new(board: Board, options: Options, book: Option<&'a (dyn Book + Send + Sync)>) -> Self {
         #[cfg(target_arch = "wasm32")]
         let mode = Mode::Normal(normal::BotState::new(board.clone(), options));
         #[cfg(not(target_arch = "wasm32"))]

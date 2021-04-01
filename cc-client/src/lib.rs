@@ -11,8 +11,11 @@ use battle::GameConfig;
 use serde::de::DeserializeOwned;
 use std::collections::HashSet;
 use std::io::prelude::*;
+use std::rc::Rc;
+use std::cell::RefCell;
+use std::sync::Arc;
 use cold_clear::evaluation::Evaluator;
-use cold_clear::Book;
+use cold_clear::{DiskBook, Book};
 
 mod player_draw;
 mod battle_ui;
@@ -248,10 +251,8 @@ where
                         Some(b) => Some(b.clone()),
                         None => {
                             let buf = std::io::BufReader::new(std::fs::File::open(path).ok()?);
-                            let book = Book::load(buf).ok()?;
-                            // let mut file = std::fs::File::create("./test.ccdb").unwrap();
-                            // opening_book::make_disk_book(&mut file, &book).unwrap();
-                            let book = std::sync::Arc::new(book);
+                            let book = DiskBook::load(buf).ok()?;
+                            let book: Arc<dyn Book + Send + Sync> = Arc::new(book);
                             *book_cache = Some(book.clone());
                             Some(book)
                         }
@@ -274,6 +275,29 @@ where
     }
 }
 
+#[derive(Serialize, Deserialize, Clone, Default)]
+struct OpaqueDebug<T>(pub T);
+
+impl<T> std::fmt::Debug for OpaqueDebug<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<{} at {:#x}>", std::any::type_name::<Self>(), self as *const _ as usize)
+    }
+}
+
+impl<T> std::ops::Deref for OpaqueDebug<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T> std::ops::DerefMut for OpaqueDebug<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[serde(default)]
 struct BotConfig<E> {
@@ -282,7 +306,7 @@ struct BotConfig<E> {
     speed_limit: u32,
     book_path: Option<String>,
     #[serde(skip)]
-    book_cache: std::rc::Rc<std::cell::RefCell<Option<std::sync::Arc<Book>>>>
+    book_cache: OpaqueDebug<Rc<RefCell<Option<Arc<dyn Book + Sync + Send>>>>>
 }
 
 #[derive(Default)]

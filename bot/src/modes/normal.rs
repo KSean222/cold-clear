@@ -107,7 +107,7 @@ impl<E: Evaluator> BotState<E> {
     pub fn suggest_move(
         &mut self,
         eval: &E,
-        book: Option<&Book>,
+        book: Option<&(dyn Book + Send + Sync)>,
         incoming: u32,
     ) -> Option<(Move, crate::Info)> {
         if !self.min_thinking_reached() {

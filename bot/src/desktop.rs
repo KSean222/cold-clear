@@ -17,7 +17,7 @@ impl Interface {
         board: Board,
         options: Options,
         evaluator: impl Evaluator + Send + 'static,
-        book: Option<Arc<Book>>
+        book: Option<Arc<dyn Book + Send + Sync>>
     ) -> Self {
         let (bot_send, recv) = unbounded();
         let (send, bot_recv) = unbounded();
@@ -112,7 +112,7 @@ fn run(
     mut board: Board,
     eval: impl Evaluator + 'static,
     options: Options,
-    book: Option<Arc<Book>>
+    book: Option<Arc<dyn Book + Send + Sync>>
 ) {
     if options.threads == 0 {
         panic!("Invalid number of threads: 0");
